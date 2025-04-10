@@ -1,92 +1,85 @@
 # EchoMind
 
-A real-time speech transcription and AI assistant application with a React frontend and Spring Boot backend.
+A real-time audio transcription and LLM interaction application featuring a React frontend and Spring Boot backend.
 
 ## Project Overview
 
-This application provides real-time speech transcription capabilities using Deepgram's API. It features a modern React frontend with Material UI components and a robust Spring Boot backend that handles WebSocket connections for streaming audio data.
+EchoMind captures audio in real-time, transcribes it using Deepgram, and allows users to interact with Large Language Models (LLMs) like Mistral through Ollama. The application is designed for seamless user experience with features like persistent UI state and robust handling of streaming data.
 
 ### Features
 
-- Real-time speech transcription
-- Speaker diarization (identifying different speakers)
-- Entity recognition
-- Sentiment analysis
-- Topic extraction
-- Placeholder for future AI chat capabilities
+*   **Real-time Transcription:** Live audio transcription via Deepgram.
+*   **Speaker Diarization:** Identifies different speakers in the transcript.
+*   **LLM Chat:** Conversational interface with Ollama-compatible LLMs (Mistral, Llama3, Gemma supported).
+*   **Streaming IO:** Handles streaming audio input (WebSockets) and streaming text output (SSE) efficiently.
+*   **Model Selection:** Allows users to select the LLM for chat.
+*   **Automatic Reconnection:** Transcription service reconnects automatically after inactivity periods.
+*   **Smart Token Spacing:** Corrects potential spacing issues in streamed LLM responses.
+*   **Persistent UI:** Remembers the last active tab (Transcription/Chat).
+*   **Modern UI:** Built with React and Material UI.
 
 ## Architecture
 
-### Frontend
+### Frontend (`frontend/`)
 
-- React 19 with TypeScript
-- Vite as the build tool
-- Material UI for components
-- Zustand for state management
-- WebSocket for real-time communication
+*   **Framework:** React (using Vite)
+*   **Language:** TypeScript
+*   **UI Library:** Material UI (MUI)
+*   **State Management:** Zustand (for transcription state)
+*   **Communication:** WebSockets (to backend for transcription), Server-Sent Events (SSE from backend for chat)
 
-### Backend
+### Backend (`backend/`)
 
-- Java 17
-- Spring Boot 3.2.5
-- Spring WebSocket for real-time communication
-- Integration with Deepgram API for speech recognition
+*   **Framework:** Spring Boot 3
+*   **Language:** Java 17
+*   **Build Tool:** Maven
+*   **WebSocket:** Spring WebSocket (handling frontend audio stream)
+*   **SSE:** Spring WebFlux/MVC (streaming LLM responses)
+*   **HTTP Client:** OkHttp3 (connecting to Deepgram & Ollama)
+*   **External Services:** Deepgram (Transcription), Ollama (LLM Serving)
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js (v18+)
-- Java 17
-- Maven
+*   Node.js (v18 or later recommended)
+*   Java Development Kit (JDK) 17 or later
+*   Maven 3.x
+*   **Deepgram API Key:** Obtain from [Deepgram](https://deepgram.com/).
+*   **(Optional) Ollama:** Install and run [Ollama](https://ollama.ai/) locally (usually `http://localhost:11434`). Pull desired models (e.g., `ollama pull mistral`, `ollama pull llama3`).
 
-### Running the Backend
+### Configuration
 
-```bash
-cd backend
-mvn spring-boot:run
-```
+1.  **Backend API Key:**
+    *   Create or edit the file `backend/src/main/resources/application.properties`.
+    *   Add your Deepgram API key:
+        ```properties
+        deepgram.api.key=YOUR_DEEPGRAM_API_KEY
+        ```
 
-### Running the Frontend
+### Running the Application
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+1.  **Start the Backend Service:**
+    ```bash
+    # Navigate to the backend directory
+    cd backend
+    # Run using Maven Spring Boot plugin
+    mvn spring-boot:run
+    ```
+    *(Wait for the backend to start, usually on port 8080)*
 
-## Future Development
+2.  **Start the Frontend Service:**
+    *   Open a **new terminal**.
+    ```bash
+    # Navigate to the frontend directory
+    cd frontend
+    # Install dependencies (only needed once)
+    npm install 
+    # Start the dev server
+    npm run dev
+    ```
 
-The application is designed with extensibility in mind, with plans to integrate LLM capabilities for AI-powered chat functionality. The ChatTab component is currently a placeholder for this future implementation.
-
-## Configuration
-
-### API Key Security
-
-The Deepgram API key is configured using environment variables for security. Before running the application, you need to set up your API key:
-
-#### Option 1: Environment Variable
-
-Set the `DEEPGRAM_API_KEY` environment variable:
-
-```bash
-# Linux/macOS
-export DEEPGRAM_API_KEY=your_api_key_here
-
-# Windows Command Prompt
-set DEEPGRAM_API_KEY=your_api_key_here
-
-# Windows PowerShell
-$env:DEEPGRAM_API_KEY="your_api_key_here"
-```
-
-#### Option 2: Local Development Configuration
-
-For local development only, you can create a copy of the template file:
-
-1. Copy `backend/src/main/resources/application.properties.template` to `backend/src/main/resources/application.properties`
-2. Add your Deepgram API key to the new file
-
+3.  **Access the Application:** Open your browser to the URL provided by the frontend dev server (usually `http://localhost:5173`).
 
 ## License
 

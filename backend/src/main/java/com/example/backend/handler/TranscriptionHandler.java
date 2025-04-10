@@ -11,6 +11,8 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Component
 public class TranscriptionHandler extends AbstractWebSocketHandler {
@@ -18,6 +20,7 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
     private static final Logger log = LoggerFactory.getLogger(TranscriptionHandler.class);
 
     private final DeepgramStreamingService deepgramService;
+    private final ConcurrentHashMap<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
     @Autowired
     public TranscriptionHandler(DeepgramStreamingService deepgramService) {
@@ -28,6 +31,11 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         log.info("Frontend WebSocket connection established: Session ID {}", session.getId());
+        sessionLocks.put(session.getId(), new ReentrantLock());
+        connectToDeepgram(session);
+    }
+
+    private void connectToDeepgram(WebSocketSession session) {
         DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
                 deepgramService.connect(session);
 
@@ -36,29 +44,51 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
             log.info("Associated Deepgram listener with frontend session {}", session.getId());
         } else {
             log.error("Failed to establish Deepgram connection for frontend session {}. Closing frontend session.", session.getId());
-            if (session.isOpen()) {
-                session.close(CloseStatus.SERVER_ERROR.withReason("Backend failed to connect to transcription service"));
-            }
+            closeFrontendSession(session, CloseStatus.SERVER_ERROR.withReason("Backend failed to connect to transcription service"));
         }
     }
 
     @Override
     protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) throws Exception {
-        DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
-                (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
-
-        if (deepgramListener == null) {
-            log.warn("Deepgram listener not found for session {}, cannot forward audio. Frontend might be closing or connection failed.", session.getId());
+        ReentrantLock lock = sessionLocks.get(session.getId());
+        if (lock == null) {
+            log.warn("Lock not found for session {}, cannot process binary message.", session.getId());
             return;
         }
 
-        ByteBuffer payload = message.getPayload();
-        byte[] audioData = new byte[payload.remaining()];
-        payload.get(audioData);
+        lock.lock();
+        try {
+            DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
+                    (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
 
-        boolean sent = deepgramListener.sendAudio(audioData);
-        if (!sent) {
-            log.warn("Failed to send audio chunk to Deepgram for session {}. WebSocket might be closed.", session.getId());
+            if (deepgramListener == null || deepgramListener.isLikelyClosed()) {
+                log.warn("Deepgram listener for session {} is null or closed. Attempting to reconnect...", session.getId());
+                session.getAttributes().remove("deepgramListener");
+                if (deepgramListener != null) {
+                    deepgramListener.close();
+                }
+
+                connectToDeepgram(session);
+                deepgramListener = (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
+
+                if (deepgramListener == null || deepgramListener.isLikelyClosed()) {
+                    log.error("Failed to reconnect to Deepgram for session {}. Cannot process audio.", session.getId());
+                    closeFrontendSession(session, CloseStatus.SERVER_ERROR.withReason("Failed to maintain connection to transcription service"));
+                    return;
+                }
+                log.info("Successfully reconnected to Deepgram for session {}.", session.getId());
+            }
+
+            ByteBuffer payload = message.getPayload();
+            byte[] audioData = new byte[payload.remaining()];
+            payload.get(audioData);
+
+            boolean sent = deepgramListener.sendAudio(audioData);
+            if (!sent) {
+                log.warn("Failed to send audio chunk to Deepgram for session {}. WebSocket might be closed.", session.getId());
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -67,24 +97,35 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
         String payload = message.getPayload();
         log.debug("Received text message from frontend: {} from session {}", payload, session.getId());
 
+        ReentrantLock lock = sessionLocks.get(session.getId());
+        if (lock == null) {
+            log.warn("Lock not found for session {}, cannot process text message.", session.getId());
+            return;
+        }
+
+        lock.lock();
         try {
-            JSONObject jsonPayload = new JSONObject(payload);
-            if (jsonPayload.has("eof") && jsonPayload.getInt("eof") == 1) {
-                log.info("Received EOF signal from frontend session {}", session.getId());
-                DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
-                        (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
-                if (deepgramListener != null) {
-                    deepgramListener.close();
-                    log.info("Requested Deepgram connection close for session {}", session.getId());
+            try {
+                JSONObject jsonPayload = new JSONObject(payload);
+                if (jsonPayload.has("eof") && jsonPayload.getInt("eof") == 1) {
+                    log.info("Received EOF signal from frontend session {}", session.getId());
+                    DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
+                            (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
+                    if (deepgramListener != null) {
+                        deepgramListener.close();
+                        log.info("Requested Deepgram connection close for session {}", session.getId());
+                    } else {
+                        log.warn("Deepgram listener not found on EOF for session {}, cannot signal close.", session.getId());
+                    }
                 } else {
-                    log.warn("Deepgram listener not found on EOF for session {}, cannot signal close.", session.getId());
+                     log.warn("Received unexpected text message format from frontend: {}", payload);
                 }
-            } else {
-                 log.warn("Received unexpected text message format from frontend: {}", payload);
+            } catch (Exception e) {
+                log.warn("Could not parse text message from frontend as JSON or unexpected content: '{}' from session {}. Error: {}",
+                         payload, session.getId(), e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Could not parse text message from frontend as JSON or unexpected content: '{}' from session {}. Error: {}",
-                     payload, session.getId(), e.getMessage());
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -92,15 +133,28 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
     public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
         log.error("Frontend transport error for session {}: {}", session.getId(), exception.getMessage(), exception);
         cleanupDeepgramConnection(session);
+        sessionLocks.remove(session.getId());
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         log.info("Frontend WebSocket connection closed: Session ID {}, Status: {}", session.getId(), status);
         cleanupDeepgramConnection(session);
+        sessionLocks.remove(session.getId());
     }
 
     private void cleanupDeepgramConnection(WebSocketSession session) {
+        ReentrantLock lock = sessionLocks.get(session.getId());
+        boolean locked = false;
+        if (lock != null) {
+            try {
+                locked = lock.tryLock(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while trying to acquire lock for cleanup on session {}. Proceeding without lock.", session.getId());
+            }
+        }
+
         DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
                 (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().remove("deepgramListener");
         if (deepgramListener != null) {
@@ -108,6 +162,20 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
             deepgramListener.close();
         } else {
              log.debug("No active Deepgram listener found in attributes to clean up for session {}", session.getId());
+        }
+
+        if (locked) {
+            lock.unlock();
+        }
+    }
+
+    private void closeFrontendSession(WebSocketSession session, CloseStatus status) {
+        if (session.isOpen()) {
+            try {
+                session.close(status);
+            } catch (IOException e) {
+                log.error("IOException closing frontend session {}: {}", session.getId(), e.getMessage());
+            }
         }
     }
 }

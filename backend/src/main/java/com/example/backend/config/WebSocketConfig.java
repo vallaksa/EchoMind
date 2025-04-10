@@ -4,7 +4,6 @@ import com.example.backend.handler.TranscriptionHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
@@ -14,16 +13,12 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
-    // Audio sample rate for Deepgram (16kHz)
-    private static final float SAMPLE_RATE = 16000.0f;
-
     // Inject the TranscriptionHandler
     @Autowired
     private TranscriptionHandler transcriptionHandler;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        System.out.println("Registering WebSocket handler for /transcribe");
         // Register the autowired handler instance
         registry.addHandler(transcriptionHandler, "/transcribe")
                 .setAllowedOrigins("*"); // Allow all origins for simplicity (consider restricting in production)

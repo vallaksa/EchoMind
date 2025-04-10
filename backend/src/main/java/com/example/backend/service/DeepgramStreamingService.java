@@ -27,7 +27,7 @@ public class DeepgramStreamingService {
 
     private static final Logger log = LoggerFactory.getLogger(DeepgramStreamingService.class);
     // Deepgram WebSocket API URL with parameters for real-time transcription
-    private static final String DEEPGRAM_URL = "wss://api.deepgram.com/v1/listen?encoding=opus&punctuate=true&interim_results=true&smart_format=true&diarize=true";
+    private static final String DEEPGRAM_URL = "wss://api.deepgram.com/v1/listen?encoding=opus&punctuate=true&interim_results=true&smart_format=true&diarize=true&keepalive=true";
 
     private final OkHttpClient okHttpClient;
     private final ObjectMapper objectMapper;
@@ -105,7 +105,6 @@ public class DeepgramStreamingService {
         public void onOpen(@NotNull okhttp3.WebSocket webSocket, @NotNull Response response) {
             log.info("Deepgram connection OPEN for frontend session: {}", frontendSession.getId());
             // Maybe send a status update to frontend?
-            // sendDtoToFrontend(new StatusMessage("connected_to_deepgram"));
         }
 
         @Override
@@ -323,12 +322,14 @@ public class DeepgramStreamingService {
         public void onClosed(@NotNull okhttp3.WebSocket webSocket, int code, @NotNull String reason) {
             log.info("Deepgram connection CLOSED for frontend session {}: Code={}, Reason={}", frontendSession.getId(), code, reason);
             sendErrorMessageToFrontendHelper(frontendSession, objectMapper, "Disconnected from transcription service.");
+            this.deepgramWebSocket = null;
         }
 
         @Override
         public void onFailure(@NotNull okhttp3.WebSocket webSocket, @NotNull Throwable t, @Nullable Response response) {
             log.error("Deepgram connection FAILURE for frontend session {}: {}", frontendSession.getId(), t.getMessage(), t);
             sendErrorMessageToFrontendHelper(frontendSession, objectMapper, "Transcription service connection failure: " + t.getMessage());
+            this.deepgramWebSocket = null;
             try {
                 frontendSession.close(org.springframework.web.socket.CloseStatus.SERVER_ERROR.withReason("Deepgram connection failed"));
             } catch (IOException e) {
@@ -372,6 +373,14 @@ public class DeepgramStreamingService {
             }
         }
 
+        // Method for the handler to check if the connection is likely closed
+        public boolean isLikelyClosed() {
+            // Check if the WebSocket reference is null (set to null on close/failure)
+            // Note: This doesn't guarantee the connection is open network-wise,
+            // but reflects if our side has intentionally closed or failed.
+            return this.deepgramWebSocket == null;
+        }
+
         // Method for the handler to send audio
         public boolean sendAudio(byte[] audioData) {
              if (deepgramWebSocket != null) {
@@ -382,15 +391,20 @@ public class DeepgramStreamingService {
              }
         }
 
-        // Method for the handler to close the Deepgram connection
+        // Method for the handler to close the Deepgram connection (Re-added)
         public void close() {
             log.info("Requesting to close Deepgram connection for frontend session {}...", frontendSession.getId());
              if (deepgramWebSocket != null) {
-                 // Send Deepgram's specific close message
-                 deepgramWebSocket.send("{\"type\": \"CloseStream\"}");
-                 // Close the WebSocket connection gracefully
-                 deepgramWebSocket.close(1000, "Client requested disconnect");
-                 deepgramWebSocket = null;
+                 try {
+                     // Send Deepgram's specific close message
+                     deepgramWebSocket.send("{\"type\": \"CloseStream\"}");
+                     // Close the WebSocket connection gracefully
+                     deepgramWebSocket.close(1000, "Client requested disconnect");
+                 } catch (IllegalStateException e) {
+                     log.warn("Attempted to close Deepgram WebSocket that was already closing/closed for session {}: {}", frontendSession.getId(), e.getMessage());
+                 } finally {
+                     deepgramWebSocket = null; // Ensure it's null after attempting close
+                 }
              }
         }
     }

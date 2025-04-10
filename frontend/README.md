@@ -1,54 +1,72 @@
 # EchoMind Frontend
 
-The frontend application for EchoMind, built with React, TypeScript, and Vite.
+This is the frontend application for EchoMind, a web application designed for real-time audio transcription and interaction with large language models (LLMs).
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+*   **Real-time Transcription:** Captures microphone audio and streams it to the backend for live transcription using Deepgram.
+*   **LLM Chat:** Engage in conversation with various LLMs (currently supporting Mistral, Llama3, Gemma via Ollama).
+*   **Streaming Responses:** Displays LLM responses as they are generated token-by-token.
+*   **Model Selection:** Choose the desired LLM for chat interactions.
+*   **Responsive UI:** Built with Material UI for a clean and adaptable interface.
+*   **Persistent Tabs:** Remembers the last active tab (Transcription or Chat) across page refreshes using Session Storage.
+*   **Automatic Reconnection:** Transcription service attempts to automatically reconnect if the connection drops due to inactivity.
 
-## Expanding the ESLint configuration
+## Tech Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+*   **Framework:** React (using Vite)
+*   **Language:** TypeScript
+*   **UI Library:** Material UI (MUI)
+*   **State Management:** Zustand (for transcription state)
+*   **Communication:** WebSockets (for transcription), Server-Sent Events (SSE for chat)
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
-```
+## Getting Started
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Prerequisites
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+*   Node.js (v18 or later recommended)
+*   npm (usually comes with Node.js)
+*   A running instance of the EchoMind backend service.
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
-```
+### Installation
+
+1.  **Clone the repository** (if you haven't already).
+2.  **Navigate to the `frontend` directory:**
+    ```bash
+    cd path/to/EchoMind/frontend
+    ```
+3.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+### Running the Development Server
+
+1.  **Ensure the backend service is running** (usually on `http://localhost:8080`).
+2.  **Start the frontend development server:**
+    ```bash
+    npm run dev
+    ```
+3.  Open your browser and navigate to the URL provided by Vite (usually `http://localhost:5173`).
+
+### Building for Production
+
+1.  **Build the static assets:**
+    ```bash
+    npm run build
+    ```
+2.  The optimized production build will be located in the `dist` directory. Deploy these files to your static file server.
+
+## Key Components
+
+*   **`App.tsx`:** Main application component, handles routing, layout, chat state, and SSE connection.
+*   **`components/TranscriptionTab.tsx`:** UI for the transcription feature, interacts with the transcription store.
+*   **`components/ChatTab.tsx`:** UI for the LLM chat feature.
+*   **`store/transcriptionStore.ts`:** Zustand store managing WebSocket connection, recording state, and transcript data.
+
+## Available Scripts
+
+*   `npm run dev`: Starts the development server with hot module replacement.
+*   `npm run build`: Creates a production-ready build.
+*   `npm run lint`: Runs ESLint to check for code style issues.
+*   `npm run preview`: Serves the production build locally for previewing.

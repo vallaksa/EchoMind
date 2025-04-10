@@ -47,10 +47,10 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
 
   // --- WebSocket Actions ---
   connectWebSocket: () => {
-    if (get().socket || get().isConnecting) return;
+    if (get().socket || get().isConnecting) {
+      return;
+    }
 
-    console.log(`Attempting to connect to WebSocket: ${WEBSOCKET_URL}`);
-    // Reset state on new connection attempt
     set({
       isConnecting: true,
       statusMessage: 'Connecting to server...',
@@ -59,13 +59,24 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       summary: '',
       topics: [],
       entities: [],
+      isConnected: false,
     });
 
-    const ws = new WebSocket(WEBSOCKET_URL);
-    ws.binaryType = 'arraybuffer';
+    let ws: WebSocket;
+    try {
+        ws = new WebSocket(WEBSOCKET_URL);
+        ws.binaryType = 'arraybuffer';
+    } catch (error) {
+        set({
+            isConnecting: false,
+            statusMessage: `Error creating WebSocket: ${error instanceof Error ? error.message : String(error)}`,
+            isConnected: false,
+            socket: null
+        });
+        return;
+    }
 
     ws.onopen = () => {
-      console.log('WebSocket connected.');
       set({
         isConnected: true,
         isConnecting: false,
@@ -77,7 +88,6 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('[DEBUG] WebSocket message received:', JSON.stringify(data)); // Log raw data
 
         const currentTranscriptSegments = get().transcript;
         let currentUtterance = get()._currentUtterance;
@@ -89,40 +99,29 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           const speaker = typeof data.speaker === 'number' ? data.speaker : undefined;
           const speakerName = data.speakerName || undefined; // Get the speaker name
 
-          console.log(`[DEBUG] Transcript: isFinal=${isFinal}, speaker=${speaker}, name=${speakerName}, text="${text}"`);
-
           if (text.trim().length > 0) { // Only process if there is text
             if (isFinal) {
-              console.log('[DEBUG] Processing as FINAL transcript segment.');
               set((prevState) => ({
                   transcript: [...prevState.transcript, { text: text + ' ', speaker, speakerName }],
                   _currentUtterance: { text: '' } // Clear the partial utterance tracker
               }));
             } else {
-              console.log('[DEBUG] Processing as PARTIAL transcript segment.');
               set({ _currentUtterance: { text: text, speaker, speakerName } });
             }
           } else if (isFinal) {
-            console.log('[DEBUG] Received empty FINAL transcript segment, clearing utterance.');
             set({ _currentUtterance: { text: '' } }); // Clear utterance tracker
-          } else {
-            console.log('[DEBUG] Received empty partial transcript segment, ignoring.');
           }
         }
         // --- Handle Summary Messages ---
         else if (data.type === 'summary') {
-          console.log('[DEBUG] Received Summary:', data.summary);
           set({ summary: data.summary || '' });
         }
         // --- Handle Topics Messages ---
         else if (data.type === 'topics') {
-          console.log('[DEBUG] Received Topics:', data.topics);
           set({ topics: data.topics || [] });
         }
         // --- Handle Entities Messages ---
         else if (data.type === 'entities') {
-           console.log('[DEBUG] Received Entities:', data.entities);
-           // Ensure the received data matches the EntityInfo interface structure
            const receivedEntities = data.entities || [];
            const validEntities: EntityInfo[] = receivedEntities.map((entity: any) => ({
                text: entity.text || '',
@@ -135,27 +134,20 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         }
         // --- Handle Language Messages (Optional) ---
         else if (data.type === 'language') {
-            console.log('[DEBUG] Received Language:', data.languageCode);
         }
         // --- Handle Sentiment Messages (Optional) ---
          else if (data.type === 'sentiment') {
-            console.log('[DEBUG] Received Sentiment Score:', data.averageScore);
         }
         // --- Handle Error Messages ---
         else if (data.type === 'error') {
-          console.error('WebSocket server error:', data.message);
           set({ statusMessage: `Server Error: ${data.message}` });
-        } else {
-          console.warn('[DEBUG] Received unhandled or unexpected message format:', data);
         }
       } catch (error) {
-        console.error('Error processing WebSocket message:', error, 'Raw data:', event.data);
         set({ statusMessage: 'Error processing server message.' });
       }
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
       set({
         isConnected: false,
         isConnecting: false,
@@ -171,7 +163,6 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
     };
 
     ws.onclose = (event) => {
-      console.log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
       const wasConnected = get().isConnected;
       const wasConnecting = get().isConnecting;
 
@@ -192,7 +183,6 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
     const { socket, stopRecording } = get();
     stopRecording();
     if (socket) {
-      console.log('Disconnecting WebSocket...');
       socket.close();
       set({ socket: null, isConnected: false, statusMessage: 'Disconnected.' });
     }
@@ -200,7 +190,6 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
 
   startRecording: async () => {
      if (get().isRecording || !get().isConnected || !get().socket) {
-      console.warn('Cannot start recording. Not connected or already recording.');
       set({ statusMessage: 'Error: Not connected to server.'});
       return;
     }
@@ -212,28 +201,34 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         topics: [],
         entities: []
     });
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      set({ audioStream: stream, statusMessage: 'Microphone access granted.'});
 
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      set({ audioStream: stream, statusMessage: 'Microphone access granted.'});
+    } catch (err) {
+        set({ statusMessage: `Microphone Error: ${err instanceof Error ? err.message : String(err)}` });
+        return;
+    }
+
+    try {
       const recorder = new MediaRecorder(stream, {
          mimeType: 'audio/webm;codecs=opus'
       });
       set({ mediaRecorder: recorder });
 
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && get().socket && get().isConnected) {
-          get().socket?.send(event.data);
+        const ws = get().socket;
+        if (event.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+           ws.send(event.data);
         }
       };
 
       recorder.onstart = () => {
-         console.log('MediaRecorder started.');
          set({ isRecording: true, statusMessage: 'Recording...' });
       };
 
       recorder.onstop = () => {
-        console.log('MediaRecorder stopped.');
         get().audioStream?.getTracks().forEach(track => track.stop());
         set({
           isRecording: false,
@@ -242,13 +237,11 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           statusMessage: get().isConnected ? 'Recording stopped.' : get().statusMessage
          });
         if (get().socket && get().isConnected) {
-            console.log('Sending EOF signal.');
             get().socket?.send(JSON.stringify({ eof: 1 }));
         }
       };
 
       recorder.onerror = (event) => {
-        console.error('MediaRecorder error:', event);
         set({ statusMessage: 'Audio recording error.', isRecording: false });
         get().stopRecording();
       }
@@ -256,13 +249,9 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       recorder.start(1000);
 
     } catch (error) {
-      console.error('Error starting recording:', error);
-       if ((error as Error).name === 'NotAllowedError' || (error as Error).name === 'PermissionDeniedError') {
-         set({ statusMessage: 'Microphone permission denied.'});
-       } else {
-          set({ statusMessage: 'Failed to start microphone.' });
-       }
-      set({ isRecording: false, audioStream: null, mediaRecorder: null });
+      set({ statusMessage: `Recorder Setup Error: ${error instanceof Error ? error.message : String(error)}` });
+       stream.getTracks().forEach(track => track.stop()); 
+       set({ audioStream: null });
     }
   },
 

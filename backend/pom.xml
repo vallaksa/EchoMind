@@ -11,7 +11,7 @@
     <groupId>com.example</groupId>
     <artifactId>echomind-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <n>echomind-backend</n>
+    <name>echomind-backend</name>
     <description>EchoMind - AI-powered transcription and assistant using Spring Boot and Deepgram</description>
     <properties>
         <java.version>17</java.version>

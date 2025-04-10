@@ -21,11 +21,6 @@ public class TranscriptMessage extends WebSocketMessage {
         this.speakerName = speakerName;
     }
     
-    // Simplified constructors might not be needed if only the full one is used internally
-    // public TranscriptMessage(String text, boolean finalResult, Integer speaker) { ... }
-    // public TranscriptMessage(String text, boolean finalResult) { ... }
-    
-
     // Getters and setters (required by Jackson for serialization)
     public String getText() { return text; }
     public void setText(String text) { this.text = text; }

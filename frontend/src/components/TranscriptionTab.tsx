@@ -1,26 +1,15 @@
 import * as React from 'react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useRef } from 'react';
 import {
   Box,
   Typography,
-  Paper,
   Button,
-  LinearProgress,
-  Chip,
-  Grid,
-  List,
-  ListItem,
-  ListItemText,
-  Divider,
+  CircularProgress,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import WifiIcon from '@mui/icons-material/Wifi';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
-import SpeakerNotesIcon from '@mui/icons-material/SpeakerNotes';
-import TopicIcon from '@mui/icons-material/Topic';
-import CategoryIcon from '@mui/icons-material/Category';
-import SummarizeIcon from '@mui/icons-material/Summarize';
 
 import { useTranscriptionStore } from '../store/transcriptionStore';
 
@@ -30,16 +19,26 @@ interface FormattedLine {
     lineText: string;
 }
 
+// --- Helper Functions (Moved Outside Component) ---
+const formatSpeaker = (speakerIndex?: number, speakerName?: string): string => {
+    const prefix = typeof speakerIndex === 'number' ? `Speaker ${speakerIndex}` : 'Unknown Speaker';
+    const namePart = speakerName ? ` (${speakerName})` : '';
+    return `${prefix}${namePart}: `;
+};
+
+const renderStatusIcon = (isConnecting: boolean, isConnected: boolean) => {
+  if (isConnecting) return <CircularProgress size={18} sx={{ mr: 1 }} />;
+  if (isConnected) return <WifiIcon color="success" sx={{ mr: 1 }} />;
+  return <WifiOffIcon color="error" sx={{ mr: 1 }} />;
+};
+
 const TranscriptionTab: React.FC = () => {
   const {
     isRecording,
     isConnected,
     isConnecting,
     transcript,
-    _currentUtterance,
-    summary,
-    topics,
-    entities,
+    _currentUtterance: currentUtterance,
     statusMessage,
     connectWebSocket,
     disconnectWebSocket,
@@ -47,10 +46,11 @@ const TranscriptionTab: React.FC = () => {
     stopRecording,
   } = useTranscriptionStore();
 
+  const transcriptContentRef = useRef<null | HTMLDivElement>(null);
   const transcriptEndRef = useRef<null | HTMLDivElement>(null);
 
   // --- Transcript Formatting Logic ---
-  const formattedLines = useMemo(() => {
+  const formattedLines = React.useMemo(() => {
     const lines: FormattedLine[] = [];
     if (!transcript || transcript.length === 0) {
         return lines;
@@ -73,13 +73,8 @@ const TranscriptionTab: React.FC = () => {
     return lines;
   }, [transcript]); // Recompute only when the final transcript changes
 
-  // --- Auto-scroll Logic ---
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [formattedLines, _currentUtterance]); // Scroll when formatted lines or partial utterance changes
-
   // --- Connection Logic ---
-  useEffect(() => {
+  React.useEffect(() => {
     connectWebSocket();
     return () => {
       disconnectWebSocket();
@@ -87,158 +82,183 @@ const TranscriptionTab: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Helper Functions ---
-  const formatSpeaker = (speakerIndex?: number, speakerName?: string): string => {
-      const prefix = typeof speakerIndex === 'number' ? `Speaker ${speakerIndex}` : 'Unknown Speaker';
-      const namePart = speakerName ? ` (${speakerName})` : '';
-      return `${prefix}${namePart}: `;
-  };
-
   // Determine the speaker info of the last formatted line
   const lastFinalSpeaker = formattedLines.length > 0 ? formattedLines[formattedLines.length - 1].speaker : undefined;
 
+  // --- Auto-scroll Logic for Transcript ---
+  React.useEffect(() => {
+      const container = transcriptContentRef.current;
+      if (container) {
+          const scrollThreshold = 150; // Distance from bottom
+          const isNearBottom = container.scrollHeight - container.clientHeight - container.scrollTop < scrollThreshold;
+
+          if (isNearBottom) {
+              transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+          }
+      }
+  // Scroll when final lines change OR when partial utterance changes
+  }, [formattedLines, currentUtterance]);
+
+  const controlsAreaHeight = 90;
+
   return (
-    <Box>
-      {/* Header and Connection Status */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h5">Real-time Transcription & Analysis</Typography>
-        <Chip
-          icon={isConnected ? <WifiIcon /> : <WifiOffIcon />}
-          label={isConnected ? 'Connected' : isConnecting ? 'Connecting...' : 'Disconnected'}
-          color={isConnected ? 'success' : isConnecting ? 'warning' : 'error'}
-          variant="outlined"
-        />
-      </Box>
-
-      <Grid container spacing={3}>
-        {/* Left Column: Transcript */}
-        <Grid item xs={12} md={7}>
-          <Typography variant="h6" gutterBottom>
-            <SpeakerNotesIcon sx={{ verticalAlign: 'middle', mr: 1 }} /> Transcript
-          </Typography>
-          <Paper elevation={3} sx={{ p: 2, mb: 2, height: '60vh', overflowY: 'auto' }}>
-             {/* Render formatted final lines */}
-             {formattedLines.map((line, index) => (
-                 <Typography key={`line-${index}`} variant="body1" component="p" style={{ whiteSpace: 'pre-wrap', marginBottom: '0.5em' }}>
-                     <Typography component="span" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                         {/* Pass name from the original transcript segment used to build this line */}
-                         {/* NOTE: This assumes the name doesn't change mid-line, which is usually safe */}
-                         {formatSpeaker(line.speaker, transcript.find(seg => seg.speaker === line.speaker)?.speakerName)}
-                     </Typography>
-                     {line.lineText}
-                 </Typography>
-             ))}
-
-            {/* Render current partial utterance, considering the last speaker */}
-            {_currentUtterance.text && (
-                <Typography variant="body1" component="span" style={{ whiteSpace: 'pre-wrap', opacity: 0.7 }}>
-                     {/* Add speaker tag to partial only if it differs from last final speaker */}
-                     {(_currentUtterance.speaker !== lastFinalSpeaker || formattedLines.length === 0) && (
-                         <Typography component="span" sx={{ fontWeight: 'bold', color: 'primary.light' }}>
-                             {/* Format partial utterance with its potential name */}
-                             {formatSpeaker(_currentUtterance.speaker, _currentUtterance.speakerName)}
-                         </Typography>
-                     )}
-                     {_currentUtterance.text}
+      // Outer Box - Add consistent padding
+      <Box sx={{ 
+          height: '100%', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          position: 'relative', 
+          p: '1.5rem' // Add overall padding
+      }}>
+        {/* Status Indicator Area (No extra padding needed) */}
+        <Box sx={{ 
+            // p: '1rem 1.5rem 0', // REMOVE padding
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center',
+            minHeight: '40px',
+            mb: 2,
+        }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}> {/* Inner box for content */}
+                {renderStatusIcon(isConnecting, isConnected)}
+                <Typography variant="caption" color="text.secondary">
+                    {statusMessage}
                 </Typography>
-            )}
-
-             {/* Show initial message if nothing has been transcribed yet */}
-            {formattedLines.length === 0 && !_currentUtterance.text && (
-                 <Typography variant="body1" color="textSecondary">
-                    {isConnected ? 'Ready to transcribe...' : 'Waiting for connection...'}
-                 </Typography>
-            )}
-            <div ref={transcriptEndRef} /> {/* Element to scroll to */}
-          </Paper>
-        </Grid>
-
-        {/* Right Column: Intelligence Features */}
-        <Grid item xs={12} md={5}>
-          {/* Summary */}
-          {summary && (
-            <Box mb={3}>
-              <Typography variant="h6" gutterBottom>
-                <SummarizeIcon sx={{ verticalAlign: 'middle', mr: 1 }} /> Summary
-              </Typography>
-              <Paper elevation={1} sx={{ p: 2, maxHeight: '15vh', overflowY: 'auto' }}>
-                <Typography variant="body2">{summary}</Typography>
-              </Paper>
             </Box>
-          )}
+        </Box>
 
-          {/* Topics */}
-          {topics.length > 0 && (
-            <Box mb={3}>
-               <Typography variant="h6" gutterBottom>
-                  <TopicIcon sx={{ verticalAlign: 'middle', mr: 1 }} /> Topics
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {topics.map((topic, index) => (
-                  <Chip key={index} label={topic} size="small" />
+        {/* Main Content Area (Grows, Handles Internal Layout, no padding here) */}
+        <Box sx={{
+            flexGrow: 1,
+            display: 'flex',
+            flexDirection: 'column', // Changed back to column
+            width: '100%',
+            overflow: 'hidden',
+            // p: '0 1.5rem', // REMOVE padding
+            pb: `${controlsAreaHeight + 16}px`, // Keep padding for controls
+        }}>
+             {/* Transcript Section (Scrolls) */}
+            <Box
+                ref={transcriptContentRef}
+                sx={{
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    // p: '0.5rem 0', // REMOVE inner padding
+                    display: 'flex',
+                    flexDirection: 'column',
+                    '&::-webkit-scrollbar': { width: '6px' },
+                    '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+                    '&::-webkit-scrollbar-thumb': { backgroundColor: '#CBD5E1', borderRadius: '8px' },
+                    pb: '1rem' // Keep padding at bottom of scroll area
+                }}
+            >
+                {/* Placeholder at the top if empty */}
+                {formattedLines.length === 0 && !currentUtterance.text && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexGrow: 1, minHeight: '100px' }}>
+                        <Typography
+                            variant="h6"
+                            component="p"
+                            sx={{ fontStyle: 'italic', fontWeight: 400, color: '#9CA3AF', textAlign: 'center' }}
+                        >
+                            Listening for audio...<br />transcribing thoughts in real time.
+                        </Typography>
+                    </Box>
+                )}
+
+                {/* Render formatted final lines */}
+                {formattedLines.map((line, index) => (
+                    <Typography key={`line-${index}`} variant="body1" component="p" style={{ whiteSpace: 'pre-wrap', marginBottom: '0.5em' }}>
+                        <Typography component="span" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                            {formatSpeaker(line.speaker, transcript.find(seg => seg.speaker === line.speaker)?.speakerName)}
+                        </Typography>
+                        {line.lineText}
+                    </Typography>
                 ))}
-              </Box>
+
+                {/* Render current partial utterance */}
+                {currentUtterance.text && (
+                    <Typography variant="body1" component="span" style={{ whiteSpace: 'pre-wrap', opacity: 0.7 }}>
+                        {(currentUtterance.speaker !== lastFinalSpeaker || formattedLines.length === 0) && (
+                            <Typography component="span" sx={{ fontWeight: 'bold', color: 'primary.light' }}>
+                                {formatSpeaker(currentUtterance.speaker, currentUtterance.speakerName)}
+                            </Typography>
+                        )}
+                        {currentUtterance.text}
+                    </Typography>
+                )}
+
+                {/* Anchor div for scrolling */}
+                <div ref={transcriptEndRef} />
             </Box>
-          )}
+            
+        </Box>
 
-          {/* Entities */}
-          {entities.length > 0 && (
-            <Box>
-               <Typography variant="h6" gutterBottom>
-                 <CategoryIcon sx={{ verticalAlign: 'middle', mr: 1 }} /> Entities
-              </Typography>
-              <Paper elevation={1} sx={{ maxHeight: '25vh', overflowY: 'auto' }}>
-                <List dense>
-                  {entities.map((entity, index) => (
-                    <React.Fragment key={index}>
-                       <ListItem>
-                         <ListItemText
-                            primary={entity.text}
-                            secondary={`${entity.type} (Conf: ${entity.confidence.toFixed(2)})`}
-                         />
-                       </ListItem>
-                       {index < entities.length - 1 && <Divider component="li" />}
-                     </React.Fragment>
-                  ))}
-                </List>
-              </Paper>
+        {/* Transcription Controls - Absolute position relative to outer Box */}
+        <Box
+            sx={{
+                position: 'absolute',
+                bottom: 0,
+                // Adjust left/right to account for parent padding
+                left: '1.5rem',
+                right: '1.5rem',
+                zIndex: 1
+            }}
+        >
+             <TranscriptionControls
+                isRecording={isRecording}
+                isConnected={isConnected}
+                isConnecting={isConnecting}
+                startRecording={startRecording}
+                stopRecording={stopRecording}
+            /> 
+        </Box>
+      </Box>
+    );
+};
+
+// --- Extracted TranscriptionControls Component (Modified) ---
+interface TranscriptionControlsProps {
+    isRecording: boolean;
+    isConnected: boolean;
+    isConnecting: boolean;
+    startRecording: () => void;
+    stopRecording: () => void;
+}
+
+export const TranscriptionControls: React.FC<TranscriptionControlsProps> = ({
+    isRecording,
+    isConnected,
+    isConnecting,
+    startRecording,
+    stopRecording
+}) => {
+
+    return (
+        // Adjusted padding, removed status message Box
+        <Box sx={{ p: '1rem 1.5rem' /* Adjusted padding */, borderTop: '1px solid #e5e7eb' }}>
+            {/* Controls Buttons */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2 }}>
+                <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={startRecording}
+                    disabled={isRecording || !isConnected || isConnecting}
+                    startIcon={<CheckCircleIcon />}
+                >
+                    Start Recording
+                </Button>
+                <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={stopRecording}
+                    disabled={!isRecording}
+                    startIcon={<ErrorIcon />}
+                >
+                    Stop Recording
+                </Button>
             </Box>
-          )}
-        </Grid>
-      </Grid>
-
-       {/* Controls and Status */}
-       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mt: 3, mb: 1, gap: 2 }}>
-         <Button
-           variant="contained"
-           color="success"
-           onClick={startRecording}
-           disabled={isRecording || !isConnected || isConnecting}
-         >
-           Start Recording
-         </Button>
-         <Button
-           variant="contained"
-           color="error"
-           onClick={stopRecording}
-           disabled={!isRecording}
-         >
-           Stop Recording
-         </Button>
-       </Box>
-
-       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '30px' }}>
-         {isRecording && <LinearProgress sx={{ width: '80%', mr: 1 }} />}
-         <Chip
-             icon={statusMessage.toLowerCase().includes('error') || statusMessage.toLowerCase().includes('fail') || statusMessage.toLowerCase().includes('denied') ? <ErrorIcon /> : <CheckCircleIcon />}
-             label={statusMessage}
-             size="small"
-             color={statusMessage.toLowerCase().includes('error') || statusMessage.toLowerCase().includes('fail') || statusMessage.toLowerCase().includes('denied') ? 'error' : 'info'}
-             variant="outlined"
-         />
-       </Box>
-    </Box>
-  );
+        </Box>
+    );
 };
 
 export default TranscriptionTab;
