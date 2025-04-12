@@ -13,9 +13,14 @@ import {
     FormControl,
     InputLabel,
     SelectChangeEvent,
+    IconButton,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import StopIcon from '@mui/icons-material/Stop';
+import EditIcon from '@mui/icons-material/Edit';
+import CancelIcon from '@mui/icons-material/Cancel';
+import SaveIcon from '@mui/icons-material/Save';
+import ReplayIcon from '@mui/icons-material/Replay';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -23,7 +28,6 @@ import remarkGfm from 'remark-gfm';
 const AVAILABLE_MODELS = [
     'mistral',
     'llama3',
-    'gemma:2b'
 ];
 
 // --- Markdown Styles (Keep) ---
@@ -41,6 +45,7 @@ const formatTimestamp = (date: Date): string => {
 
 // --- Interfaces for Props ---
 export interface Message {
+    id: string;
     sender: 'user' | 'ai';
     text: string;
     timestamp?: string;
@@ -58,6 +63,11 @@ interface ChatTabProps {
     onKeyPress: (event: React.KeyboardEvent) => void;
     onSend: () => void;
     onStop: () => void;
+    editingMessageId: string | null;
+    onEditClick: (messageId: string, currentText: string) => void;
+    onSaveEdit: () => void;
+    onCancelEdit: () => void;
+    onRegenerate: () => void;
 }
 
 // --- Main ChatTab Component (Refactored) ---
@@ -70,7 +80,12 @@ const ChatTab: React.FC<ChatTabProps> = ({
     onInputChange,
     onKeyPress,
     onSend,
-    onStop
+    onStop,
+    editingMessageId,
+    onEditClick,
+    onSaveEdit,
+    onCancelEdit,
+    onRegenerate,
 }) => {
     const chatContainerRef = useRef<null | HTMLDivElement>(null);
     const messagesEndRef = useRef<null | HTMLDivElement>(null);
@@ -93,10 +108,10 @@ const ChatTab: React.FC<ChatTabProps> = ({
 
     return (
         // Outermost Box - Add consistent padding
-        <Box sx={{ 
-            height: '100%', 
-            display: 'flex', 
-            flexDirection: 'column', 
+        <Box sx={{
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
             position: 'relative',
             p: '1.5rem' // Add overall padding (adjust as needed)
         }}>
@@ -127,7 +142,7 @@ const ChatTab: React.FC<ChatTabProps> = ({
                     overflowY: 'auto',
                     overflowX: 'hidden',
                     // p: '0 1.5rem', // REMOVE padding, handled by parent
-                    pb: `${inputAreaHeight + 16}px`, 
+                    pb: `${inputAreaHeight + 16}px`,
                     // Scrollbar styles...
                     '&::-webkit-scrollbar': { width: '6px' },
                     '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
@@ -137,14 +152,28 @@ const ChatTab: React.FC<ChatTabProps> = ({
                 <List sx={{ padding: 0 }}>
                     {messages.map((msg, index) => (
                         <ListItem
-                            key={index}
+                            key={msg.id}
                             sx={{
                                 display: 'flex',
+                                alignItems: 'flex-end',
                                 justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start',
                                 mb: 1,
                                 px: 0,
+                                position: 'relative',
                             }}
                         >
+                            {msg.sender === 'user' && !editingMessageId && (
+                                <Box sx={{ mr: 1, alignSelf: 'center' }}>
+                                    <IconButton
+                                        size="small"
+                                        onClick={() => onEditClick(msg.id, msg.text)}
+                                        aria-label="edit message"
+                                        sx={{ color: 'text.secondary' }}
+                                    >
+                                        <EditIcon fontSize="inherit" />
+                                    </IconButton>
+                                </Box>
+                            )}
                             <Paper
                                 elevation={1}
                                 sx={{
@@ -159,43 +188,55 @@ const ChatTab: React.FC<ChatTabProps> = ({
                                     pb: '22px',
                                 }}
                             >
-                                 <Typography 
-                                    variant="body1" 
-                                    component="div" 
+                                <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
+                                    <Typography
+                                        variant="body1"
+                                        component="div"
+                                        sx={{
+                                            pr: msg.sender === 'ai' ? '30px' : '50px',
+                                            fontFamily: 'monospace',
+                                            flexGrow: 1,
+                                        }}
+                                    >
+                                        {msg.sender === 'ai' ? (
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    p: ({ node, ...props }) => <p style={markdownStyles.p} {...props} />,
+                                                    ol: ({ node, ...props }) => <ol style={markdownStyles.ol} {...props} />,
+                                                    ul: ({ node, ...props }) => <ul style={markdownStyles.ul} {...props} />,
+                                                    li: ({ node, ...props }) => <li style={markdownStyles.li} {...props} />,
+                                                }}
+                                            >
+                                                {msg.text || (isChatLoading && index === messages.length - 1 && msg.sender === 'ai' && msg.text === '' ? '...' : '')}
+                                            </ReactMarkdown>
+                                        ) : (
+                                            msg.text
+                                        )}
+                                    </Typography>
+                                    {msg.sender === 'ai' && index === messages.length - 1 && !isChatLoading && msg.text !== '' && (
+                                        <IconButton
+                                            size="small"
+                                            onClick={onRegenerate}
+                                            aria-label="regenerate response"
+                                            sx={{ color: 'text.secondary', ml: 0.5, flexShrink: 0 }}
+                                        >
+                                            <ReplayIcon fontSize="inherit" />
+                                        </IconButton>
+                                    )}
+                                </Box>
+                                <Typography
+                                    variant="caption"
                                     sx={{
-                                        pr: '50px',
-                                        fontFamily: 'monospace'
+                                        position: 'absolute',
+                                        bottom: '5px',
+                                        right: '10px',
+                                        color: msg.sender === 'user' ? 'rgba(255, 255, 255, 0.7)' : 'text.secondary',
+                                        fontSize: '0.7rem',
                                     }}
-                                 >
-                                     {msg.sender === 'ai' ? (
-                                         <ReactMarkdown
-                                             remarkPlugins={[remarkGfm]}
-                                             components={{
-                                                 p: ({ node, ...props }) => <p style={markdownStyles.p} {...props} />,
-                                                 ol: ({ node, ...props }) => <ol style={markdownStyles.ol} {...props} />,
-                                                 ul: ({ node, ...props }) => <ul style={markdownStyles.ul} {...props} />,
-                                                 li: ({ node, ...props }) => <li style={markdownStyles.li} {...props} />,
-                                             }}
-                                         >
-                                             {/* Show loading dots only if the *last* message is an empty AI message */}
-                                             {msg.text || (isChatLoading && messages[messages.length -1] === msg && msg.sender === 'ai' && msg.text === '' ? '...' : '')}
-                                         </ReactMarkdown>
-                                     ) : (
-                                         msg.text
-                                     )}
-                                 </Typography>
-                                 <Typography
-                                     variant="caption"
-                                     sx={{
-                                         position: 'absolute',
-                                         bottom: '5px',
-                                         right: '10px',
-                                         color: msg.sender === 'user' ? 'rgba(255, 255, 255, 0.7)' : 'text.secondary',
-                                         fontSize: '0.7rem',
-                                     }}
-                                 >
-                                     {msg.timestamp}
-                                 </Typography>
+                                >
+                                    {msg.timestamp}
+                                </Typography>
                             </Paper>
                         </ListItem>
                     ))}
@@ -215,22 +256,25 @@ const ChatTab: React.FC<ChatTabProps> = ({
 
             {/* Chat Input - Absolute position relative to outer Box */}
             <Box
-              sx={{ 
-                position: 'absolute', 
-                bottom: 0, 
+              sx={{
+                position: 'absolute',
+                bottom: 0,
                 // Adjust left/right to account for parent padding
-                left: '1.5rem', 
+                left: '1.5rem',
                 right: '1.5rem',
-                zIndex: 1 
+                zIndex: 1
               }}
             >
-                <ChatInput 
+                <ChatInput
                     prompt={prompt}
-                    isLoading={isChatLoading} 
+                    isLoading={isChatLoading}
                     onInputChange={onInputChange}
-                    onKeyPress={onKeyPress}
+                    onKeyPress={(e) => { if (!editingMessageId) { onKeyPress(e); } }}
                     onSend={onSend}
                     onStop={onStop}
+                    isEditing={!!editingMessageId}
+                    onSaveEdit={onSaveEdit}
+                    onCancelEdit={onCancelEdit}
                 />
             </Box>
         </Box>
@@ -245,6 +289,9 @@ interface ChatInputProps {
     onKeyPress: (event: React.KeyboardEvent) => void;
     onSend: () => void;
     onStop: () => void;
+    isEditing: boolean;
+    onSaveEdit: () => void;
+    onCancelEdit: () => void;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -254,6 +301,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     onKeyPress,
     onSend,
     onStop,
+    isEditing,
+    onSaveEdit,
+    onCancelEdit,
 }) => {
     return (
         <Box sx={{
@@ -269,11 +319,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <TextField
                 fullWidth
                 variant="standard"
-                placeholder="Type a message..."
+                placeholder={isEditing ? "Edit your message..." : "Type a message..."}
                 value={prompt}
                 onChange={onInputChange}
-                onKeyPress={onKeyPress}
-                disabled={isLoading}
+                onKeyPress={(e) => { if (!isEditing) { onKeyPress(e); } }}
+                disabled={isLoading && !isEditing}
                 multiline
                 maxRows={4}
                 sx={{
@@ -287,10 +337,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 InputProps={{ disableUnderline: true }}
                 autoFocus // Maybe autofocus?
             />
+            {isEditing && (
+                <IconButton
+                    onClick={onCancelEdit}
+                    aria-label="cancel edit"
+                    sx={{ color: 'text.secondary' }}
+                >
+                    <CancelIcon />
+                </IconButton>
+            )}
             <Button
                 variant="contained"
-                onClick={isLoading ? onStop : onSend}
-                disabled={!isLoading && !prompt.trim()}
+                onClick={isEditing ? onSaveEdit : (isLoading ? onStop : onSend)}
+                disabled={(isEditing && !prompt.trim()) || (!isEditing && !isLoading && !prompt.trim())}
                 sx={{
                     minWidth: '40px',
                     width: '40px',
@@ -309,7 +368,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     }
                 }}
             >
-                {isLoading ? (
+                {isEditing ? (
+                    <SaveIcon fontSize="small" />
+                ) : isLoading ? (
                     <StopIcon fontSize='small' />
                 ) : (
                     <ArrowUpwardIcon fontSize='small' />
@@ -319,4 +380,4 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     );
 };
 
-export default ChatTab; 
+export default ChatTab;

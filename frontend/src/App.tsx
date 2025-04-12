@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CssBaseline,
   AppBar,
@@ -22,6 +22,7 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import TranscriptionTab from './components/TranscriptionTab';
 import ChatTab, { Message } from './components/ChatTab';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { v4 as uuidv4 } from 'uuid';
 
 // --- Define the custom theme based on designPrompt ---
 const theme = createTheme({
@@ -132,6 +133,8 @@ function App() {
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   const [selectedModel, setSelectedModel] = useState<string>('llama3');
   const eventSourceRef = React.useRef<EventSource | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [originalPromptBeforeEdit, setOriginalPromptBeforeEdit] = useState<string>('');
 
   const formatTimestamp = (date: Date): string => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -151,30 +154,13 @@ function App() {
     };
   }, [closeEventSource]);
 
-  const handleSend = useCallback(() => {
-    if (!prompt.trim() || isChatLoading) return;
-
-    closeEventSource();
-
-    const timestamp = formatTimestamp(new Date());
-    const userMessage = { sender: 'user' as const, text: prompt, timestamp };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsChatLoading(true);
-    setPrompt('');
-
-    setMessages((prev) => [...prev, { sender: 'ai' as const, text: '', timestamp: formatTimestamp(new Date()) }]);
-
-    const encodedPrompt = encodeURIComponent(userMessage.text);
-    const encodedModel = encodeURIComponent(selectedModel);
-    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
-
+  // --- Helper to Setup SSE Connection ---
+  const setupEventSource = (url: string, targetAiMessageId: string | null = null) => {
     const newEventSource = new EventSource(url);
     eventSourceRef.current = newEventSource;
     (newEventSource as any)._hasReceivedData = false;
 
-    newEventSource.onopen = () => {
-      // Connection is open, ready for messages
-    };
+    newEventSource.onopen = () => { /* Connection opened */ };
 
     newEventSource.onmessage = (event) => {
       const chunk = event.data;
@@ -182,45 +168,79 @@ function App() {
       (eventSourceRef.current as any)._hasReceivedData = true;
 
       setMessages((prevMessages) => {
-        const lastMessage = prevMessages[prevMessages.length - 1];
-        if (lastMessage && lastMessage.sender === 'ai') {
-          const newText = lastMessage.text + chunk;
-          return [
-            ...prevMessages.slice(0, -1),
-            { ...lastMessage, text: newText, timestamp: formatTimestamp(new Date()) },
-          ];
+        const messageIdToUpdate = targetAiMessageId ?? prevMessages[prevMessages.length - 1]?.id;
+        if (!messageIdToUpdate) return prevMessages; // Should not happen if placeholder exists
+
+        const targetIndex = prevMessages.findIndex(m => m.id === messageIdToUpdate);
+        if (targetIndex !== -1 && prevMessages[targetIndex].sender === 'ai') {
+          const updatedMessages = [...prevMessages];
+          const targetMessage = updatedMessages[targetIndex];
+          const newText = targetMessage.text + chunk;
+          updatedMessages[targetIndex] = { ...targetMessage, text: newText, timestamp: formatTimestamp(new Date()) };
+          return updatedMessages;
         }
-        return [...prevMessages, { sender: 'ai', text: chunk, timestamp: formatTimestamp(new Date()) }];
+        // Fallback: Add new AI message if target wasn't found or wasn't AI (less likely now)
+        return [...prevMessages, { id: uuidv4(), sender: 'ai', text: chunk, timestamp: formatTimestamp(new Date()) }];
       });
     };
 
     newEventSource.onerror = (error) => {
       const receivedData = (eventSourceRef.current as any)?._hasReceivedData;
-
       if (!receivedData) {
         setMessages((prevMessages) => {
-          const lastMessage = prevMessages[prevMessages.length - 1];
-          if (lastMessage && lastMessage.sender === 'ai' && lastMessage.text === '') {
-            return [
-              ...prevMessages.slice(0, -1),
-              { ...lastMessage, text: '[Error connecting to AI]', timestamp: formatTimestamp(new Date()) },
-            ];
+          const messageIdToUpdate = targetAiMessageId ?? prevMessages[prevMessages.length - 1]?.id;
+          if (!messageIdToUpdate) return prevMessages;
+
+          const targetIndex = prevMessages.findIndex(m => m.id === messageIdToUpdate);
+          if (targetIndex !== -1 && prevMessages[targetIndex].sender === 'ai') {
+            const updatedMessages = [...prevMessages];
+            updatedMessages[targetIndex] = {
+              ...updatedMessages[targetIndex],
+              text: '[Error connecting to AI]', // Or a more specific error
+              timestamp: formatTimestamp(new Date())
+            };
+            return updatedMessages;
           }
-          return [...prevMessages, { sender: 'ai', text: '[Error connecting to AI]', timestamp: formatTimestamp(new Date()) }];
+          // Fallback: Add new error message
+          return [...prevMessages, { id: uuidv4(), sender: 'ai', text: '[Error connecting to AI]', timestamp: formatTimestamp(new Date()) }];
         });
       }
-
       setIsChatLoading(false);
-      closeEventSource();
+      closeEventSource(); // Close on error
     };
+  };
 
-  }, [prompt, isChatLoading, selectedModel, closeEventSource]);
+  // --- Chat Interaction Handlers ---
+  const handleSend = useCallback(() => {
+    if (editingMessageId) return;
+    if (!prompt.trim() || isChatLoading) return;
+
+    closeEventSource();
+
+    const timestamp = formatTimestamp(new Date());
+    const userMessage: Message = { id: uuidv4(), sender: 'user' as const, text: prompt, timestamp };
+    setMessages((prev) => [...prev, userMessage]);
+    setIsChatLoading(true);
+    setPrompt('');
+
+    // Add AI placeholder and get its ID
+    const placeholderId = uuidv4();
+    setMessages((prev) => [...prev, { id: placeholderId, sender: 'ai' as const, text: '', timestamp: formatTimestamp(new Date()) }]);
+
+    const encodedPrompt = encodeURIComponent(userMessage.text);
+    const encodedModel = encodeURIComponent(selectedModel);
+    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
+
+    setupEventSource(url, placeholderId); // Call helper
+
+  }, [prompt, isChatLoading, selectedModel, closeEventSource, editingMessageId]);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setPrompt(event.target.value);
   };
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
+    if (editingMessageId) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       handleSend();
@@ -258,6 +278,108 @@ function App() {
   const drawerWidth = 240;
   const bottomNavClearance = 90;
 
+  // --- Editing Handlers ---
+  const handleEditClick = (messageId: string, currentText: string) => {
+    setEditingMessageId(messageId);
+    setOriginalPromptBeforeEdit(prompt);
+    setPrompt(currentText);
+    closeEventSource();
+    setIsChatLoading(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setPrompt(originalPromptBeforeEdit);
+    setOriginalPromptBeforeEdit('');
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingMessageId || !prompt.trim()) return;
+
+    const messageIndex = messages.findIndex(m => m.id === editingMessageId);
+    if (messageIndex === -1) {
+      handleCancelEdit();
+      return;
+    }
+
+    const updatedMessage: Message = {
+      ...messages[messageIndex],
+      text: prompt,
+      timestamp: formatTimestamp(new Date()) + ' (edited)',
+    };
+
+    const newMessages = [...messages.slice(0, messageIndex), updatedMessage];
+
+    setMessages(newMessages);
+
+    const editedPrompt = prompt;
+    setEditingMessageId(null);
+    setOriginalPromptBeforeEdit('');
+    setPrompt('');
+
+    setIsChatLoading(true);
+    // Add AI placeholder and get its ID
+    const placeholderId = uuidv4();
+    setMessages((prev) => [...prev, { id: placeholderId, sender: 'ai' as const, text: '', timestamp: formatTimestamp(new Date()) }]);
+
+    const encodedPrompt = encodeURIComponent(editedPrompt);
+    const encodedModel = encodeURIComponent(selectedModel);
+    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
+
+    setupEventSource(url, placeholderId); // Call helper
+  };
+
+  // --- Regenerate Handler ---
+  const handleRegenerate = useCallback(() => {
+    if (isChatLoading || messages.length < 2) return;
+
+    let lastAiMessageIndex = -1;
+    let precedingUserMessageIndex = -1;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender === 'ai') {
+        lastAiMessageIndex = i;
+        if (i > 0 && messages[i - 1].sender === 'user') {
+          precedingUserMessageIndex = i - 1;
+          break;
+        }
+      }
+    }
+
+    if (lastAiMessageIndex === -1 || precedingUserMessageIndex === -1) {
+      return;
+    }
+
+    const userPromptToRegenerate = messages[precedingUserMessageIndex].text;
+    const targetAiMessageId = messages[lastAiMessageIndex].id;
+
+    // Clear the target AI message text
+    setMessages(prev => {
+      const updatedMessages = [...prev];
+      const targetIndex = updatedMessages.findIndex(m => m.id === targetAiMessageId);
+      if (targetIndex !== -1) {
+        updatedMessages[targetIndex] = {
+          ...updatedMessages[targetIndex],
+          text: '',
+          timestamp: formatTimestamp(new Date())
+        };
+      }
+      return updatedMessages;
+    });
+
+    setIsChatLoading(true);
+    closeEventSource();
+
+    // --- Start new SSE Request ---
+    const encodedPrompt = encodeURIComponent(userPromptToRegenerate);
+    const encodedModel = encodeURIComponent(selectedModel);
+    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
+
+    // Call helper, passing the ID of the AI message to update
+    setupEventSource(url, targetAiMessageId);
+
+  }, [messages, isChatLoading, selectedModel, closeEventSource]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -267,7 +389,7 @@ function App() {
           color="transparent"
           elevation={0}
           sx={{
-            bgcolor: 'background.default',
+        bgcolor: 'background.default',
             borderBottom: '1px solid #e5e7eb',
             zIndex: themeMui.zIndex.drawer + 1,
           }}
@@ -291,18 +413,18 @@ function App() {
             >
               <MenuIcon />
             </IconButton>
-            <Typography
-              variant="h5"
+        <Typography
+          variant="h5"
               noWrap
               component="div"
-              sx={{
+          sx={{
                 fontWeight: 600,
                 flexGrow: 1,
                 textAlign: 'center',
-              }}
-            >
-              EchoMind
-            </Typography>
+          }}
+        >
+          EchoMind
+        </Typography>
             <Box sx={{ width: 48, mr: 2 }} />
           </Toolbar>
         </AppBar>
@@ -339,27 +461,27 @@ function App() {
                 py: 2,
                 overflow: 'hidden'
              }}>
-                <Box
-                  component={Paper}
-                  elevation={0}
-                  sx={{
+        <Box
+          component={Paper}
+          elevation={0}
+          sx={{
                     width: '100%',
                     maxWidth: '700px',
-                    flexGrow: 1,
-                    borderRadius: '24px',
-                    bgcolor: 'background.paper',
-                    display: 'flex',
+            flexGrow: 1,
+            borderRadius: '24px',
+            bgcolor: 'background.paper',
+            display: 'flex',
                     flexDirection: 'column',
                     position: 'relative',
                     boxShadow: '0 6px 20px rgba(0, 0, 0, 0.08)',
                     overflow: 'hidden',
-                  }}
-                >
+          }}
+        >
                     <Box sx={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}>
-                        <TabPanel value={value} index={0}>
-                            <TranscriptionTab />
-                        </TabPanel>
-                        <TabPanel value={value} index={1}>
+          <TabPanel value={value} index={0}>
+            <TranscriptionTab />
+          </TabPanel>
+          <TabPanel value={value} index={1}>
                             <ChatTab
                                 messages={messages}
                                 selectedModel={selectedModel}
@@ -368,10 +490,15 @@ function App() {
                                 isChatLoading={isChatLoading}
                                 onInputChange={handleInputChange}
                                 onKeyPress={handleKeyPress}
-                                onSend={handleSend}
+                                onSend={editingMessageId ? handleSaveEdit : handleSend}
                                 onStop={closeEventSource}
+                                editingMessageId={editingMessageId}
+                                onEditClick={handleEditClick}
+                                onSaveEdit={handleSaveEdit}
+                                onCancelEdit={handleCancelEdit}
+                                onRegenerate={handleRegenerate}
                             />
-                        </TabPanel>
+          </TabPanel>
                     </Box>
                 </Box>
             </Container>
@@ -421,7 +548,7 @@ function App() {
                   fontWeight: 500,
                   transition: 'all 0.2s ease-in-out',
                   '& .MuiTab-iconWrapper': { marginRight: '6px' },
-                  '&.Mui-selected': { 
+                  '&.Mui-selected': {
                     backgroundColor: theme.palette.primary.main,
                     color: 'white',
                     outline: 'none',
@@ -443,7 +570,7 @@ function App() {
                   fontWeight: 500,
                   transition: 'all 0.2s ease-in-out',
                   '& .MuiTab-iconWrapper': { marginRight: '6px' },
-                  '&.Mui-selected': { 
+                  '&.Mui-selected': {
                     backgroundColor: theme.palette.primary.main,
                     color: 'white',
                     outline: 'none',
