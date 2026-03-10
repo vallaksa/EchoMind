@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   CssBaseline,
   AppBar,
@@ -23,6 +23,8 @@ import TranscriptionTab from './components/TranscriptionTab';
 import ChatTab, { Message } from './components/ChatTab';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { v4 as uuidv4 } from 'uuid';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import { useTranscriptionStore } from './store/transcriptionStore';
 
 // --- Define the custom theme based on designPrompt ---
 const theme = createTheme({
@@ -96,13 +98,16 @@ function TabPanel(props: TabPanelProps) {
   return (
     <div
       role="tabpanel"
-      hidden={value !== index}
       id={`tabpanel-${index}`}
       aria-labelledby={`tab-${index}`}
       {...other}
-      style={{ height: '100%', width: '100%' }}
+      style={{
+        height: '100%',
+        width: '100%',
+        display: value === index ? 'block' : 'none',
+      }}
     >
-      {value === index && children}
+      {children}
     </div>
   );
 }
@@ -119,10 +124,10 @@ const DrawerHeader = styled('div')(({ theme }: { theme: Theme }) => ({
 function App() {
   // Initialize state from sessionStorage, default to 0
   const [value, setValue] = useState<number>(() => {
-      const savedTab = sessionStorage.getItem('echoMindActiveTab');
-      const initialValue = savedTab ? parseInt(savedTab, 10) : 0;
-      // Ensure value is valid (0 or 1)
-      return (initialValue === 0 || initialValue === 1) ? initialValue : 0;
+    const savedTab = sessionStorage.getItem('echoMindActiveTab');
+    const initialValue = savedTab ? parseInt(savedTab, 10) : 0;
+    // Ensure value is valid (0 or 1)
+    return (initialValue === 0 || initialValue === 1) ? initialValue : 0;
   });
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -131,8 +136,8 @@ function App() {
   const [prompt, setPrompt] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
-  const [selectedModel, setSelectedModel] = useState<string>('llama3');
-  const eventSourceRef = React.useRef<EventSource | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
+  const abortControllerRef = React.useRef<AbortController | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [originalPromptBeforeEdit, setOriginalPromptBeforeEdit] = useState<string>('');
 
@@ -141,9 +146,9 @@ function App() {
   };
 
   const closeEventSource = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
       setIsChatLoading(false);
     }
   }, []);
@@ -155,59 +160,83 @@ function App() {
   }, [closeEventSource]);
 
   // --- Helper to Setup SSE Connection ---
-  const setupEventSource = (url: string, targetAiMessageId: string | null = null) => {
-    const newEventSource = new EventSource(url);
-    eventSourceRef.current = newEventSource;
-    (newEventSource as any)._hasReceivedData = false;
+  const setupEventSource = async (promptText: string, modelName: string, transcriptContext: string, targetAiMessageId: string | null = null) => {
+    abortControllerRef.current = new AbortController();
+    let hasReceivedData = false;
 
-    newEventSource.onopen = () => { /* Connection opened */ };
+    try {
+      await fetchEventSource('http://localhost:8080/api/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream'
+        },
+        body: JSON.stringify({
+          prompt: promptText,
+          model: modelName,
+          context: transcriptContext
+        }),
+        signal: abortControllerRef.current.signal,
 
-    newEventSource.onmessage = (event) => {
-      const chunk = event.data;
-      if (!eventSourceRef.current) return;
-      (eventSourceRef.current as any)._hasReceivedData = true;
-
-      setMessages((prevMessages) => {
-        const messageIdToUpdate = targetAiMessageId ?? prevMessages[prevMessages.length - 1]?.id;
-        if (!messageIdToUpdate) return prevMessages; // Should not happen if placeholder exists
-
-        const targetIndex = prevMessages.findIndex(m => m.id === messageIdToUpdate);
-        if (targetIndex !== -1 && prevMessages[targetIndex].sender === 'ai') {
-          const updatedMessages = [...prevMessages];
-          const targetMessage = updatedMessages[targetIndex];
-          const newText = targetMessage.text + chunk;
-          updatedMessages[targetIndex] = { ...targetMessage, text: newText, timestamp: formatTimestamp(new Date()) };
-          return updatedMessages;
-        }
-        // Fallback: Add new AI message if target wasn't found or wasn't AI (less likely now)
-        return [...prevMessages, { id: uuidv4(), sender: 'ai', text: chunk, timestamp: formatTimestamp(new Date()) }];
-      });
-    };
-
-    newEventSource.onerror = (error) => {
-      const receivedData = (eventSourceRef.current as any)?._hasReceivedData;
-      if (!receivedData) {
-        setMessages((prevMessages) => {
-          const messageIdToUpdate = targetAiMessageId ?? prevMessages[prevMessages.length - 1]?.id;
-          if (!messageIdToUpdate) return prevMessages;
-
-          const targetIndex = prevMessages.findIndex(m => m.id === messageIdToUpdate);
-          if (targetIndex !== -1 && prevMessages[targetIndex].sender === 'ai') {
-            const updatedMessages = [...prevMessages];
-            updatedMessages[targetIndex] = {
-              ...updatedMessages[targetIndex],
-              text: '[Error connecting to AI]', // Or a more specific error
-              timestamp: formatTimestamp(new Date())
-            };
-            return updatedMessages;
+        onopen(res) {
+          if (res.ok && res.status === 200) {
+            console.log("Connection established");
+          } else {
+            console.error("Connection error", res);
           }
-          // Fallback: Add new error message
-          return [...prevMessages, { id: uuidv4(), sender: 'ai', text: '[Error connecting to AI]', timestamp: formatTimestamp(new Date()) }];
-        });
-      }
+          return Promise.resolve();
+        },
+        onmessage(event) {
+          const chunk = event.data;
+          hasReceivedData = true;
+
+          setMessages((prevMessages) => {
+            const messageIdToUpdate = targetAiMessageId ?? prevMessages[prevMessages.length - 1]?.id;
+            if (!messageIdToUpdate) return prevMessages;
+
+            const targetIndex = prevMessages.findIndex(m => m.id === messageIdToUpdate);
+            if (targetIndex !== -1 && prevMessages[targetIndex].sender === 'ai') {
+              const updatedMessages = [...prevMessages];
+              const targetMessage = updatedMessages[targetIndex];
+              const newText = targetMessage.text + chunk;
+              updatedMessages[targetIndex] = { ...targetMessage, text: newText, timestamp: formatTimestamp(new Date()) };
+              return updatedMessages;
+            }
+            return [...prevMessages, { id: uuidv4(), sender: 'ai', text: chunk, timestamp: formatTimestamp(new Date()) }];
+          });
+        },
+        onerror(error) {
+          console.error("SSE Error:", error);
+          if (!hasReceivedData) {
+            setMessages((prevMessages) => {
+              const messageIdToUpdate = targetAiMessageId ?? prevMessages[prevMessages.length - 1]?.id;
+              if (!messageIdToUpdate) return prevMessages;
+
+              const targetIndex = prevMessages.findIndex(m => m.id === messageIdToUpdate);
+              if (targetIndex !== -1 && prevMessages[targetIndex].sender === 'ai') {
+                const updatedMessages = [...prevMessages];
+                updatedMessages[targetIndex] = {
+                  ...updatedMessages[targetIndex],
+                  text: '[Error connecting to AI]',
+                  timestamp: formatTimestamp(new Date())
+                };
+                return updatedMessages;
+              }
+              return [...prevMessages, { id: uuidv4(), sender: 'ai', text: '[Error connecting to AI]', timestamp: formatTimestamp(new Date()) }];
+            });
+          }
+          setIsChatLoading(false);
+          closeEventSource();
+          throw error; // stop retrying
+        },
+        onclose() {
+          setIsChatLoading(false);
+        }
+      });
+    } catch (e) {
+      console.log("Event stream closed or errored:", e);
       setIsChatLoading(false);
-      closeEventSource(); // Close on error
-    };
+    }
   };
 
   // --- Chat Interaction Handlers ---
@@ -227,11 +256,8 @@ function App() {
     const placeholderId = uuidv4();
     setMessages((prev) => [...prev, { id: placeholderId, sender: 'ai' as const, text: '', timestamp: formatTimestamp(new Date()) }]);
 
-    const encodedPrompt = encodeURIComponent(userMessage.text);
-    const encodedModel = encodeURIComponent(selectedModel);
-    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
-
-    setupEventSource(url, placeholderId); // Call helper
+    const transcriptContext = useTranscriptionStore.getState().getFormattedTranscript();
+    setupEventSource(userMessage.text, selectedModel, transcriptContext, placeholderId);
 
   }, [prompt, isChatLoading, selectedModel, closeEventSource, editingMessageId]);
 
@@ -251,9 +277,7 @@ function App() {
     setSelectedModel(event.target.value as string);
   };
 
-  const handleDrawerOpen = () => {
-    setDrawerOpen(true);
-  };
+
 
   const handleDrawerClose = () => {
     setDrawerOpen(false);
@@ -265,8 +289,8 @@ function App() {
   };
 
   // Update handleNavigation to save to sessionStorage
-  const handleNavigation = (event: React.SyntheticEvent, index: number) => {
-    if (index !== 1) { 
+  const handleNavigation = (_event: React.SyntheticEvent, index: number) => {
+    if (index !== 1) {
       closeEventSource();
     }
     // Save to sessionStorage
@@ -322,11 +346,8 @@ function App() {
     const placeholderId = uuidv4();
     setMessages((prev) => [...prev, { id: placeholderId, sender: 'ai' as const, text: '', timestamp: formatTimestamp(new Date()) }]);
 
-    const encodedPrompt = encodeURIComponent(editedPrompt);
-    const encodedModel = encodeURIComponent(selectedModel);
-    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
-
-    setupEventSource(url, placeholderId); // Call helper
+    const transcriptContext = useTranscriptionStore.getState().getFormattedTranscript();
+    setupEventSource(editedPrompt, selectedModel, transcriptContext, placeholderId);
   };
 
   // --- Regenerate Handler ---
@@ -371,12 +392,8 @@ function App() {
     closeEventSource();
 
     // --- Start new SSE Request ---
-    const encodedPrompt = encodeURIComponent(userPromptToRegenerate);
-    const encodedModel = encodeURIComponent(selectedModel);
-    const url = `http://localhost:8080/api/chat/stream?prompt=${encodedPrompt}&model=${encodedModel}`;
-
-    // Call helper, passing the ID of the AI message to update
-    setupEventSource(url, targetAiMessageId);
+    const transcriptContext = useTranscriptionStore.getState().getFormattedTranscript();
+    setupEventSource(userPromptToRegenerate, selectedModel, transcriptContext, targetAiMessageId);
 
   }, [messages, isChatLoading, selectedModel, closeEventSource]);
 
@@ -389,7 +406,7 @@ function App() {
           color="transparent"
           elevation={0}
           sx={{
-        bgcolor: 'background.default',
+            bgcolor: 'background.default',
             borderBottom: '1px solid #e5e7eb',
             zIndex: themeMui.zIndex.drawer + 1,
           }}
@@ -400,7 +417,7 @@ function App() {
               aria-label="toggle drawer"
               onClick={handleDrawerToggle}
               edge="start"
-              sx={{ 
+              sx={{
                 mr: 2,
                 '&:focus': {
                   outline: 'none',
@@ -413,18 +430,18 @@ function App() {
             >
               <MenuIcon />
             </IconButton>
-        <Typography
-          variant="h5"
+            <Typography
+              variant="h5"
               noWrap
               component="div"
-          sx={{
+              sx={{
                 fontWeight: 600,
                 flexGrow: 1,
                 textAlign: 'center',
-          }}
-        >
-          EchoMind
-        </Typography>
+              }}
+            >
+              EchoMind
+            </Typography>
             <Box sx={{ width: 48, mr: 2 }} />
           </Toolbar>
         </AppBar>
@@ -438,70 +455,70 @@ function App() {
           sx={{ '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth } }}
         >
           <Toolbar />
-          <Typography sx={{p:2}}>Drawer Content (Optional)</Typography>
+          <Typography sx={{ p: 2 }}>Drawer Content (Optional)</Typography>
         </Drawer>
 
         <Box
-            component="main"
-            sx={{
-                flexGrow: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                bgcolor: 'background.default',
-                mt: `calc(${themeMui.mixins.toolbar.minHeight}px + 1px)`,
-                overflow: 'hidden',
-                pb: `${bottomNavClearance}px`
-            }}
-        >
-            <DrawerHeader />
-            <Container maxWidth="md" sx={{
-                flexGrow: 1,
-                display: 'flex',
-                justifyContent: 'center',
-                py: 2,
-                overflow: 'hidden'
-             }}>
-        <Box
-          component={Paper}
-          elevation={0}
+          component="main"
           sx={{
-                    width: '100%',
-                    maxWidth: '700px',
             flexGrow: 1,
-            borderRadius: '24px',
-            bgcolor: 'background.paper',
             display: 'flex',
-                    flexDirection: 'column',
-                    position: 'relative',
-                    boxShadow: '0 6px 20px rgba(0, 0, 0, 0.08)',
-                    overflow: 'hidden',
+            flexDirection: 'column',
+            bgcolor: 'background.default',
+            mt: `calc(${themeMui.mixins.toolbar.minHeight}px + 1px)`,
+            overflow: 'hidden',
+            pb: `${bottomNavClearance}px`
           }}
         >
-                    <Box sx={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}>
-          <TabPanel value={value} index={0}>
-            <TranscriptionTab />
-          </TabPanel>
-          <TabPanel value={value} index={1}>
-                            <ChatTab
-                                messages={messages}
-                                selectedModel={selectedModel}
-                                onModelChange={handleModelChange}
-                                prompt={prompt}
-                                isChatLoading={isChatLoading}
-                                onInputChange={handleInputChange}
-                                onKeyPress={handleKeyPress}
-                                onSend={editingMessageId ? handleSaveEdit : handleSend}
-                                onStop={closeEventSource}
-                                editingMessageId={editingMessageId}
-                                onEditClick={handleEditClick}
-                                onSaveEdit={handleSaveEdit}
-                                onCancelEdit={handleCancelEdit}
-                                onRegenerate={handleRegenerate}
-                            />
-          </TabPanel>
-                    </Box>
-                </Box>
-            </Container>
+          <DrawerHeader />
+          <Container maxWidth="md" sx={{
+            flexGrow: 1,
+            display: 'flex',
+            justifyContent: 'center',
+            py: 2,
+            overflow: 'hidden'
+          }}>
+            <Box
+              component={Paper}
+              elevation={0}
+              sx={{
+                width: '100%',
+                maxWidth: '700px',
+                flexGrow: 1,
+                borderRadius: '24px',
+                bgcolor: 'background.paper',
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'relative',
+                boxShadow: '0 6px 20px rgba(0, 0, 0, 0.08)',
+                overflow: 'hidden',
+              }}
+            >
+              <Box sx={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}>
+                <TabPanel value={value} index={0}>
+                  <TranscriptionTab />
+                </TabPanel>
+                <TabPanel value={value} index={1}>
+                  <ChatTab
+                    messages={messages}
+                    selectedModel={selectedModel}
+                    onModelChange={handleModelChange}
+                    prompt={prompt}
+                    isChatLoading={isChatLoading}
+                    onInputChange={handleInputChange}
+                    onKeyPress={handleKeyPress}
+                    onSend={editingMessageId ? handleSaveEdit : handleSend}
+                    onStop={closeEventSource}
+                    editingMessageId={editingMessageId}
+                    onEditClick={handleEditClick}
+                    onSaveEdit={handleSaveEdit}
+                    onCancelEdit={handleCancelEdit}
+                    onRegenerate={handleRegenerate}
+                  />
+                </TabPanel>
+              </Box>
+            </Box>
+          </Container>
         </Box>
 
         <Box sx={{
@@ -527,14 +544,14 @@ function App() {
               aria-label="navigation tabs"
               TabIndicatorProps={{ style: { display: 'none' } }}
               sx={{
-                minHeight:'auto',
+                minHeight: 'auto',
                 '.MuiTabs-flexContainer': {
                   gap: '4px',
                 }
               }}
             >
               <Tab
-                icon={<MicIcon fontSize="small"/>}
+                icon={<MicIcon fontSize="small" />}
                 iconPosition="start"
                 label="Transcription"
                 value={0}
@@ -556,7 +573,7 @@ function App() {
                 }}
               />
               <Tab
-                icon={<ChatBubbleOutlineIcon fontSize="small"/>}
+                icon={<ChatBubbleOutlineIcon fontSize="small" />}
                 iconPosition="start"
                 label="Chat"
                 value={1}

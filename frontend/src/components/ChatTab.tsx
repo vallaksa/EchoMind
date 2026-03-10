@@ -23,11 +23,14 @@ import SaveIcon from '@mui/icons-material/Save';
 import ReplayIcon from '@mui/icons-material/Replay';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useTranscriptionStore } from '../store/transcriptionStore';
 
 // --- Model List (Keep or move to App/config) ---
 const AVAILABLE_MODELS = [
-    'mistral',
-    'llama3',
+    'gpt-oss:120b-cloud',
+    'qwen3-coder:480b-cloud',
+    'kimi-k2.5:cloud',
+    'deepseek-v3.1:671b-cloud',
 ];
 
 // --- Markdown Styles (Keep) ---
@@ -91,6 +94,10 @@ const ChatTab: React.FC<ChatTabProps> = ({
     const messagesEndRef = useRef<null | HTMLDivElement>(null);
     const inputAreaHeight = 70; // Estimate or calculate height of ChatInput
 
+    // Get live transcript context stats
+    const transcript = useTranscriptionStore(state => state.transcript);
+    const contextSize = transcript.length;
+
     // --- Auto-scroll Logic (Re-added with user scroll check) ---
     useEffect(() => {
         const container = chatContainerRef.current;
@@ -115,8 +122,8 @@ const ChatTab: React.FC<ChatTabProps> = ({
             position: 'relative',
             p: '1.5rem' // Add overall padding (adjust as needed)
         }}>
-            {/* Model Selector (No extra padding needed) */}
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 /* Keep margin */ }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 2, gap: 2 }}>
+                {/* Model Selector */}
                 <FormControl sx={{ minWidth: 200 }} size="small">
                     <InputLabel id="model-select-label">Model</InputLabel>
                     <Select
@@ -132,6 +139,23 @@ const ChatTab: React.FC<ChatTabProps> = ({
                         ))}
                     </Select>
                 </FormControl>
+
+                {/* Context Indicator Badge */}
+                <Box sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    px: 1.5,
+                    py: 0.5,
+                    borderRadius: 4,
+                    bgcolor: contextSize > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(107, 114, 128, 0.1)',
+                    color: contextSize > 0 ? '#10b981' : '#6b7280',
+                    fontSize: '0.8rem',
+                    fontWeight: 500,
+                    border: '1px solid',
+                    borderColor: contextSize > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(107, 114, 128, 0.2)'
+                }}>
+                    {contextSize > 0 ? `🧠 ${contextSize} segments attached` : '💬 No meeting context'}
+                </Box>
             </Box>
 
             {/* Chat Messages Container (Grows, Scrolls, no padding here) */}
@@ -241,7 +265,7 @@ const ChatTab: React.FC<ChatTabProps> = ({
                         </ListItem>
                     ))}
                     {/* Loading indicator if AI is responding (and last message is empty AI placeholder) */}
-                     {isChatLoading && messages.length > 0 && messages[messages.length - 1]?.sender === 'ai' && messages[messages.length - 1]?.text === '' && (
+                    {isChatLoading && messages.length > 0 && messages[messages.length - 1]?.sender === 'ai' && messages[messages.length - 1]?.text === '' && (
                         <ListItem sx={{ justifyContent: 'flex-start', px: 0 }}>
                             <Paper elevation={0} sx={{ p: '8px 14px', bgcolor: 'grey.200', borderRadius: 2 }}>
                                 <CircularProgress size={18} />
@@ -256,14 +280,14 @@ const ChatTab: React.FC<ChatTabProps> = ({
 
             {/* Chat Input - Absolute position relative to outer Box */}
             <Box
-              sx={{
-                position: 'absolute',
-                bottom: 0,
-                // Adjust left/right to account for parent padding
-                left: '1.5rem',
-                right: '1.5rem',
-                zIndex: 1
-              }}
+                sx={{
+                    position: 'absolute',
+                    bottom: 0,
+                    // Adjust left/right to account for parent padding
+                    left: '1.5rem',
+                    right: '1.5rem',
+                    zIndex: 1
+                }}
             >
                 <ChatInput
                     prompt={prompt}
@@ -361,10 +385,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     boxShadow: 'none',
                     transition: 'all 0.3s ease',
                     '&:hover': {
-                         bgcolor: '#4F46E5',
+                        bgcolor: '#4F46E5',
                     },
                     '&.Mui-disabled': {
-                         bgcolor: 'grey.300',
+                        bgcolor: 'grey.300',
                     }
                 }}
             >

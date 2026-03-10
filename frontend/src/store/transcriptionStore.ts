@@ -29,6 +29,7 @@ type TranscriptionState = {
   disconnectWebSocket: () => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
+  getFormattedTranscript: () => string;
 };
 
 export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
@@ -54,26 +55,22 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
     set({
       isConnecting: true,
       statusMessage: 'Connecting to server...',
-      transcript: [],
       _currentUtterance: { text: '' },
-      summary: '',
-      topics: [],
-      entities: [],
       isConnected: false,
     });
 
     let ws: WebSocket;
     try {
-        ws = new WebSocket(WEBSOCKET_URL);
-        ws.binaryType = 'arraybuffer';
+      ws = new WebSocket(WEBSOCKET_URL);
+      ws.binaryType = 'arraybuffer';
     } catch (error) {
-        set({
-            isConnecting: false,
-            statusMessage: `Error creating WebSocket: ${error instanceof Error ? error.message : String(error)}`,
-            isConnected: false,
-            socket: null
-        });
-        return;
+      set({
+        isConnecting: false,
+        statusMessage: `Error creating WebSocket: ${error instanceof Error ? error.message : String(error)}`,
+        isConnected: false,
+        socket: null
+      });
+      return;
     }
 
     ws.onopen = () => {
@@ -89,8 +86,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       try {
         const data = JSON.parse(event.data);
 
-        const currentTranscriptSegments = get().transcript;
-        let currentUtterance = get()._currentUtterance;
+
 
         // --- Handle Transcript Messages (with Diarization + Name) ---
         if (data.type === 'transcript') {
@@ -102,8 +98,8 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           if (text.trim().length > 0) { // Only process if there is text
             if (isFinal) {
               set((prevState) => ({
-                  transcript: [...prevState.transcript, { text: text + ' ', speaker, speakerName }],
-                  _currentUtterance: { text: '' } // Clear the partial utterance tracker
+                transcript: [...prevState.transcript, { text: text + ' ', speaker, speakerName }],
+                _currentUtterance: { text: '' } // Clear the partial utterance tracker
               }));
             } else {
               set({ _currentUtterance: { text: text, speaker, speakerName } });
@@ -122,27 +118,27 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         }
         // --- Handle Entities Messages ---
         else if (data.type === 'entities') {
-           const receivedEntities = data.entities || [];
-           const validEntities: EntityInfo[] = receivedEntities.map((entity: any) => ({
-               text: entity.text || '',
-               type: entity.type || 'UNKNOWN', // Use 'type' matching our interface
-               confidence: entity.confidence || 0,
-               startWord: entity.startWord || 0,
-               endWord: entity.endWord || 0
-           }));
-           set({ entities: validEntities });
+          const receivedEntities = data.entities || [];
+          const validEntities: EntityInfo[] = receivedEntities.map((entity: any) => ({
+            text: entity.text || '',
+            type: entity.type || 'UNKNOWN', // Use 'type' matching our interface
+            confidence: entity.confidence || 0,
+            startWord: entity.startWord || 0,
+            endWord: entity.endWord || 0
+          }));
+          set({ entities: validEntities });
         }
         // --- Handle Language Messages (Optional) ---
         else if (data.type === 'language') {
         }
         // --- Handle Sentiment Messages (Optional) ---
-         else if (data.type === 'sentiment') {
+        else if (data.type === 'sentiment') {
         }
         // --- Handle Error Messages ---
         else if (data.type === 'error') {
           set({ statusMessage: `Server Error: ${data.message}` });
         }
-      } catch (error) {
+      } catch {
         set({ statusMessage: 'Error processing server message.' });
       }
     };
@@ -162,19 +158,19 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       get().stopRecording();
     };
 
-    ws.onclose = (event) => {
+    ws.onclose = (_event) => {
       const wasConnected = get().isConnected;
       const wasConnecting = get().isConnecting;
 
       set({
-          isConnected: false,
-          isConnecting: false,
-          socket: null,
-          statusMessage: (wasConnected && !wasConnecting) ? 'Disconnected from server.' : get().statusMessage,
-          isRecording: false,
-          _currentUtterance: { text: '' }, // Reset partial on close
-          // Keep summary/topics/entities on normal close
-       });
+        isConnected: false,
+        isConnecting: false,
+        socket: null,
+        statusMessage: (wasConnected && !wasConnecting) ? 'Disconnected from server.' : get().statusMessage,
+        isRecording: false,
+        _currentUtterance: { text: '' }, // Reset partial on close
+        // Keep summary/topics/entities on normal close
+      });
       get().stopRecording();
     };
   },
@@ -189,43 +185,43 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   },
 
   startRecording: async () => {
-     if (get().isRecording || !get().isConnected || !get().socket) {
-      set({ statusMessage: 'Error: Not connected to server.'});
+    if (get().isRecording || !get().isConnected || !get().socket) {
+      set({ statusMessage: 'Error: Not connected to server.' });
       return;
     }
     set({
-        statusMessage: 'Initializing audio...',
-        transcript: [],
-        _currentUtterance: { text: '' },
-        summary: '',
-        topics: [],
-        entities: []
+      statusMessage: 'Initializing audio...',
+      transcript: [],
+      _currentUtterance: { text: '' },
+      summary: '',
+      topics: [],
+      entities: []
     });
 
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      set({ audioStream: stream, statusMessage: 'Microphone access granted.'});
+      set({ audioStream: stream, statusMessage: 'Microphone access granted.' });
     } catch (err) {
-        set({ statusMessage: `Microphone Error: ${err instanceof Error ? err.message : String(err)}` });
-        return;
+      set({ statusMessage: `Microphone Error: ${err instanceof Error ? err.message : String(err)}` });
+      return;
     }
 
     try {
       const recorder = new MediaRecorder(stream, {
-         mimeType: 'audio/webm;codecs=opus'
+        mimeType: 'audio/webm;codecs=opus'
       });
       set({ mediaRecorder: recorder });
 
       recorder.ondataavailable = (event) => {
         const ws = get().socket;
         if (event.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-           ws.send(event.data);
+          ws.send(event.data);
         }
       };
 
       recorder.onstart = () => {
-         set({ isRecording: true, statusMessage: 'Recording...' });
+        set({ isRecording: true, statusMessage: 'Recording...' });
       };
 
       recorder.onstop = () => {
@@ -235,13 +231,13 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           audioStream: null,
           mediaRecorder: null,
           statusMessage: get().isConnected ? 'Recording stopped.' : get().statusMessage
-         });
+        });
         if (get().socket && get().isConnected) {
-            get().socket?.send(JSON.stringify({ eof: 1 }));
+          get().socket?.send(JSON.stringify({ eof: 1 }));
         }
       };
 
-      recorder.onerror = (event) => {
+      recorder.onerror = (_event) => {
         set({ statusMessage: 'Audio recording error.', isRecording: false });
         get().stopRecording();
       }
@@ -250,8 +246,8 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
 
     } catch (error) {
       set({ statusMessage: `Recorder Setup Error: ${error instanceof Error ? error.message : String(error)}` });
-       stream.getTracks().forEach(track => track.stop()); 
-       set({ audioStream: null });
+      stream.getTracks().forEach(track => track.stop());
+      set({ audioStream: null });
     }
   },
 
@@ -260,8 +256,17 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
     if (mediaRecorder && isRecording) {
       mediaRecorder.stop();
     } else {
-        get().audioStream?.getTracks().forEach(track => track.stop());
-        set({ audioStream: null, mediaRecorder: null });
+      get().audioStream?.getTracks().forEach(track => track.stop());
+      set({ audioStream: null, mediaRecorder: null });
     }
   },
+
+  getFormattedTranscript: () => {
+    const { transcript } = get();
+    if (transcript.length === 0) return '';
+    return transcript.map(t => {
+      const speakerLabel = t.speakerName ? `${t.speakerName}` : (t.speaker !== undefined ? `Speaker ${t.speaker}` : 'Unknown');
+      return `[${speakerLabel}]: ${t.text}`;
+    }).join('\n');
+  }
 }));

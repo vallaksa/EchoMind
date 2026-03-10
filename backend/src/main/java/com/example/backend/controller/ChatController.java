@@ -5,9 +5,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import com.example.backend.dto.ChatRequest;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -31,14 +33,15 @@ public class ChatController {
         this.ollamaStreamService = ollamaStreamService;
     }
 
-    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamChat(
-            @RequestParam String prompt,
-            // Make model optional, it will use the default in the service if not provided
-            @RequestParam(required = false) String model) {
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamChat(@RequestBody ChatRequest request) {
                 
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-        logger.info("SSE connection established for prompt: '{}', model: '{}'", prompt, model == null ? "(default)" : model);
+        String prompt = request.getPrompt();
+        String model = request.getModel();
+        String context = request.getContext();
+
+        logger.info("SSE POST connection established for prompt: '{}', model: '{}'", prompt, model == null ? "(default)" : model);
 
         // Define callbacks for the service
         Consumer<String> onChunkReceived = chunk -> {
@@ -67,7 +70,7 @@ public class ChatController {
         // Use the executor service to run the Ollama interaction asynchronously
         sseExecutor.execute(() -> {
             try {
-                ollamaStreamService.streamChat(prompt, model, onChunkReceived, onComplete, onError);
+                ollamaStreamService.streamChat(prompt, model, context, onChunkReceived, onComplete, onError);
             } catch (Exception e) {
                 // Catch any unexpected exception from the service call itself
                  logger.error("Unexpected error invoking OllamaStreamService for model {}", model == null ? "(default)" : model, e);

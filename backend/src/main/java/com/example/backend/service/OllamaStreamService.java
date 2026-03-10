@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils; // Import StringUtils
 
@@ -15,35 +16,52 @@ import java.util.function.Consumer;
 public class OllamaStreamService {
 
     private static final Logger logger = LoggerFactory.getLogger(OllamaStreamService.class);
-    private static final String OLLAMA_API_URL = "http://localhost:11434/api/generate"; // Make configurable later if needed
-    private static final String DEFAULT_OLLAMA_MODEL = "mistral"; // Define a default model
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
     private final OkHttpClient httpClient;
+    private final String ollamaApiUrl;
+    private final String defaultModel;
 
     @Autowired
-    public OllamaStreamService(OkHttpClient httpClient) {
+    public OllamaStreamService(
+            OkHttpClient httpClient,
+            @Value("${ollama.api.url}") String ollamaApiUrl,
+            @Value("${ollama.default.model}") String defaultModel) {
         this.httpClient = httpClient;
+        this.ollamaApiUrl = ollamaApiUrl;
+        this.defaultModel = defaultModel;
     }
 
-    public void streamChat(String prompt, String model, Consumer<String> onChunkReceived, Runnable onComplete, Consumer<Exception> onError) {
+    public void streamChat(String prompt, String model, String context, Consumer<String> onChunkReceived, Runnable onComplete, Consumer<Exception> onError) {
         
         // Use provided model or default if empty/null
-        String selectedModel = StringUtils.hasText(model) ? model : DEFAULT_OLLAMA_MODEL;
+        String selectedModel = StringUtils.hasText(model) ? model : defaultModel;
         logger.info("Using Ollama model: {}", selectedModel);
         
         JSONObject jsonBody = new JSONObject();
         jsonBody.put("model", selectedModel); // Use selected model
         jsonBody.put("prompt", prompt);
+        
+        // If context is provided, inject it as a system prompt
+        if (StringUtils.hasText(context)) {
+            String systemPrompt = "You are a helpful AI assistant attending an ongoing meeting. " +
+                                  "Below is the live meeting transcript. Use this context to answer the user's questions.\n" +
+                                  "--- MEETING TRANSCRIPT ---\n" +
+                                  context + "\n" +
+                                  "--- END TRANSCRIPT ---\n";
+            jsonBody.put("system", systemPrompt);
+            logger.info("Injected meeting context into system prompt.");
+        }
+        
         jsonBody.put("stream", true);
 
         RequestBody body = RequestBody.create(jsonBody.toString(), JSON);
         Request request = new Request.Builder()
-                .url(OLLAMA_API_URL)
+                .url(ollamaApiUrl)
                 .post(body)
                 .build();
 
-        logger.info("Sending request to Ollama API: {}", OLLAMA_API_URL);
+        logger.info("Sending request to Ollama API: {}", ollamaApiUrl);
 
         // Execute in a background thread managed by the controller or caller
         try (Response response = httpClient.newCall(request).execute()) {
