@@ -4,19 +4,20 @@ A real-time audio transcription and LLM interaction application featuring a Reac
 
 ## Project Overview
 
-EchoMind captures audio in real-time, transcribes it using Deepgram, and allows users to interact with Large Language Models (LLMs) like Mistral through Ollama. The application is designed for seamless user experience with features like persistent UI state and robust handling of streaming data.
+EchoMind captures audio in real-time, transcribes it using Deepgram, and allows users to interact with local Ollama-served Large Language Models (LLMs). The application is designed for seamless user experience with features like persistent UI state and robust handling of streaming data.
 
 ### Features
 
 *   **Real-time Transcription:** Live audio transcription via Deepgram.
 *   **Speaker Diarization:** Identifies different speakers in the transcript.
-*   **LLM Chat:** Conversational interface with Ollama-compatible LLMs (Mistral, Llama3, Gemma supported).
+*   **LLM Chat:** Conversational interface with the Ollama-compatible models configured on the local machine.
 *   **Streaming IO:** Handles streaming audio input (WebSockets) and streaming text output (SSE) efficiently.
 *   **Model Selection:** Allows users to select the LLM for chat.
 *   **Automatic Reconnection:** Transcription service reconnects automatically after inactivity periods.
 *   **Smart Token Spacing:** Corrects potential spacing issues in streamed LLM responses.
 *   **Persistent UI:** Remembers the last active tab (Transcription/Chat).
 *   **Modern UI:** Built with React and Material UI.
+*   **Deferred Transcript Enrichment:** Summary, topic, and sentiment parsing scaffolding exists in the backend, but those Deepgram features are not currently enabled in the live request configuration.
 
 ## Architecture
 
@@ -46,7 +47,7 @@ EchoMind captures audio in real-time, transcribes it using Deepgram, and allows 
 *   Java Development Kit (JDK) 17 or later
 *   Maven 3.x
 *   **Deepgram API Key:** Obtain from [Deepgram](https://deepgram.com/).
-*   **(Optional) Ollama:** Install and run [Ollama](https://ollama.ai/) locally (usually `http://localhost:11434`). Pull desired models (e.g., `ollama pull mistral`, `ollama pull llama3`).
+*   **(Optional) Ollama:** Install and run [Ollama](https://ollama.ai/) locally (usually `http://localhost:11434`). Ensure the configured model names are available on the machine.
 
 ### Configuration
 

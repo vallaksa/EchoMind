@@ -5,9 +5,9 @@ This is the backend service for EchoMind, built with Java 17 and Spring Boot 3.
 ## Features
 
 *   **WebSocket Transcription:** Manages WebSocket connections from the frontend, receives audio streams, and forwards them to Deepgram for real-time transcription.
-*   **Deepgram Integration:** Connects to Deepgram's streaming API, handles responses (transcripts, diarization, entities, topics, summaries, sentiment), and forwards structured messages back to the frontend.
+*   **Deepgram Integration:** Connects to Deepgram's streaming API, handles live transcripts, diarization, and entities, and forwards structured messages back to the frontend.
 *   **Automatic Reconnection:** Attempts to automatically re-establish the connection to Deepgram if it drops due to inactivity, ensuring transcription resumes seamlessly after pauses.
-*   **LLM Chat Streaming:** Provides an SSE (Server-Sent Events) endpoint (`/api/chat/stream`) that takes a prompt and streams responses from an Ollama-compatible LLM (e.g., Mistral, Llama3, Gemma).
+*   **LLM Chat Streaming:** Provides an SSE (Server-Sent Events) endpoint (`/api/chat/stream`) that accepts a JSON `POST` body and streams responses from the configured Ollama model.
 *   **Smart Token Spacing:** Intelligently adds spaces between streamed LLM tokens to prevent words from being glued together.
 *   **CORS Configuration:** Allows requests from any origin (configurable).
 
@@ -28,7 +28,7 @@ This is the backend service for EchoMind, built with Java 17 and Spring Boot 3.
 *   Java Development Kit (JDK) 17 or later
 *   Maven 3.x
 *   **Deepgram API Key:** You need an API key from [Deepgram](https://deepgram.com/).
-*   **(Optional) Ollama:** To use the LLM chat feature, you need a running instance of [Ollama](https://ollama.ai/) accessible from the backend (default URL assumes `http://localhost:11434`). Ensure you have pulled the desired models (e.g., `ollama pull mistral`).
+*   **(Optional) Ollama:** To use the LLM chat feature, you need a running instance of [Ollama](https://ollama.ai/) accessible from the backend (default URL assumes `http://localhost:11434`). Ensure the configured model names exist on the local machine.
 
 ### Configuration
 
@@ -37,7 +37,7 @@ This is the backend service for EchoMind, built with Java 17 and Spring Boot 3.
     ```properties
     deepgram.api.key=YOUR_DEEPGRAM_API_KEY
     ```
-3.  (Optional) If your Ollama instance is running elsewhere, configure its URL (this requires modifying `OllamaStreamService.java` currently, could be moved to properties later).
+3.  (Optional) If your Ollama instance is running elsewhere, update `ollama.api.url` in `application.properties`.
 
 ### Running the Application
 
@@ -70,4 +70,4 @@ This is the backend service for EchoMind, built with Java 17 and Spring Boot 3.
 ## API Endpoints
 
 *   **WebSocket:** `ws://localhost:8080/transcribe` (Handles audio streaming from frontend)
-*   **SSE:** `GET http://localhost:8080/api/chat/stream?prompt={YourPrompt}&model={OptionalModelName}` (Streams LLM chat responses) 
+*   **SSE:** `POST http://localhost:8080/api/chat/stream` with JSON body `{"prompt":"...","model":"optional","context":"optional"}` (Streams LLM chat responses) 

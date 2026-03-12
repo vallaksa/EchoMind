@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 
-// Define the backend WebSocket URL
-const WEBSOCKET_URL = 'ws://localhost:8080/transcribe';
+// Build the WebSocket URL relative to the current host (Vite proxy forwards to :8080)
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WEBSOCKET_URL = `${wsProtocol}//${window.location.host}/transcribe`;
 
 // Define the structure for entities for frontend use
 interface EntityInfo {
@@ -110,7 +111,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         }
         // --- Handle Summary Messages ---
         else if (data.type === 'summary') {
-          set({ summary: data.summary || '' });
+          set({ summary: data.text || '' });
         }
         // --- Handle Topics Messages ---
         else if (data.type === 'topics') {
@@ -130,9 +131,11 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         }
         // --- Handle Language Messages (Optional) ---
         else if (data.type === 'language') {
+          void data.code;
         }
         // --- Handle Sentiment Messages (Optional) ---
         else if (data.type === 'sentiment') {
+          void data.average;
         }
         // --- Handle Error Messages ---
         else if (data.type === 'error') {
@@ -143,7 +146,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       }
     };
 
-    ws.onerror = (error) => {
+    ws.onerror = (_event) => {
       set({
         isConnected: false,
         isConnecting: false,

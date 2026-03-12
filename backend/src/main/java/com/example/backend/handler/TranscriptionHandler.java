@@ -25,7 +25,7 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
     @Autowired
     public TranscriptionHandler(DeepgramStreamingService deepgramService) {
         this.deepgramService = deepgramService;
-        log.info("TranscriptionHandler initialized with Deepgram Service.");
+        log.info("TranscriptionHandler initialized.");
     }
 
     @Override
@@ -41,9 +41,9 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
 
         if (deepgramListener != null) {
             session.getAttributes().put("deepgramListener", deepgramListener);
-            log.info("Associated Deepgram listener with frontend session {}", session.getId());
+            log.info("Connected frontend session {} to Deepgram.", session.getId());
         } else {
-            log.error("Failed to establish Deepgram connection for frontend session {}. Closing frontend session.", session.getId());
+            log.error("Failed to establish Deepgram connection for session {}.", session.getId());
             closeFrontendSession(session, CloseStatus.SERVER_ERROR.withReason("Backend failed to connect to transcription service"));
         }
     }
@@ -62,7 +62,7 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
                     (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
 
             if (deepgramListener == null || deepgramListener.isLikelyClosed()) {
-                log.warn("Deepgram listener for session {} is null or closed. Attempting to reconnect...", session.getId());
+                log.warn("Deepgram listener missing or closed for session {}. Reconnecting.", session.getId());
                 session.getAttributes().remove("deepgramListener");
                 if (deepgramListener != null) {
                     deepgramListener.close();
@@ -72,11 +72,11 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
                 deepgramListener = (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
 
                 if (deepgramListener == null || deepgramListener.isLikelyClosed()) {
-                    log.error("Failed to reconnect to Deepgram for session {}. Cannot process audio.", session.getId());
+                    log.error("Unable to reconnect to Deepgram for session {}.", session.getId());
                     closeFrontendSession(session, CloseStatus.SERVER_ERROR.withReason("Failed to maintain connection to transcription service"));
                     return;
                 }
-                log.info("Successfully reconnected to Deepgram for session {}.", session.getId());
+                log.info("Reconnected Deepgram for session {}.", session.getId());
             }
 
             ByteBuffer payload = message.getPayload();
@@ -85,7 +85,7 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
 
             boolean sent = deepgramListener.sendAudio(audioData);
             if (!sent) {
-                log.warn("Failed to send audio chunk to Deepgram for session {}. WebSocket might be closed.", session.getId());
+                log.warn("Failed to send audio chunk to Deepgram for session {}.", session.getId());
             }
         } finally {
             lock.unlock();
@@ -113,16 +113,15 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
                             (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().get("deepgramListener");
                     if (deepgramListener != null) {
                         deepgramListener.close();
-                        log.info("Requested Deepgram connection close for session {}", session.getId());
+                        log.info("Requested Deepgram close for session {}", session.getId());
                     } else {
-                        log.warn("Deepgram listener not found on EOF for session {}, cannot signal close.", session.getId());
+                        log.warn("Deepgram listener missing on EOF for session {}.", session.getId());
                     }
                 } else {
-                     log.warn("Received unexpected text message format from frontend: {}", payload);
+                    log.warn("Received unexpected text message from frontend session {}: {}", session.getId(), payload);
                 }
             } catch (Exception e) {
-                log.warn("Could not parse text message from frontend as JSON or unexpected content: '{}' from session {}. Error: {}",
-                         payload, session.getId(), e.getMessage());
+                log.warn("Could not parse frontend text message for session {}: {}", session.getId(), e.getMessage());
             }
         } finally {
             lock.unlock();
@@ -158,10 +157,10 @@ public class TranscriptionHandler extends AbstractWebSocketHandler {
         DeepgramStreamingService.DeepgramWebSocketListener deepgramListener =
                 (DeepgramStreamingService.DeepgramWebSocketListener) session.getAttributes().remove("deepgramListener");
         if (deepgramListener != null) {
-            log.info("Cleaning up Deepgram connection for frontend session {}", session.getId());
+            log.info("Cleaning up Deepgram connection for session {}", session.getId());
             deepgramListener.close();
         } else {
-             log.debug("No active Deepgram listener found in attributes to clean up for session {}", session.getId());
+            log.debug("No Deepgram listener found during cleanup for session {}", session.getId());
         }
 
         if (locked) {

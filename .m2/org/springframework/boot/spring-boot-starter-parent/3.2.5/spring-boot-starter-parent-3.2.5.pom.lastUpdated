@@ -1,0 +1,7 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Tue Mar 10 03:12:47 EDT 2026
+@default-maven-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1773126767119
+@default-jitpack.io-https\://jitpack.io/.lastUpdated=1773126767130
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1773126767139
+https\://jitpack.io/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-parent\:pom\:3.2.5 from/to jitpack.io (https\://jitpack.io)\: transfer failed for https\://jitpack.io/org/springframework/boot/spring-boot-starter-parent/3.2.5/spring-boot-starter-parent-3.2.5.pom
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-parent\:pom\:3.2.5 from/to central (https\://repo.maven.apache.org/maven2)\: transfer failed for https\://repo.maven.apache.org/maven2/org/springframework/boot/spring-boot-starter-parent/3.2.5/spring-boot-starter-parent-3.2.5.pom

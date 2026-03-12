@@ -1,9 +1,14 @@
-# Set the server port for the WebSocket connection
-server.port=8080
+# ─── Server ──────────────────────────────────────────
+server.port=${SERVER_PORT:8080}
 
-# Deepgram API Key - Replace with your actual API key
-deepgram.api.key=YOUR_DEEPGRAM_API_KEY_HERE
+# ─── Deepgram ────────────────────────────────────────
+# Required — set DEEPGRAM_API_KEY in your .env file
+deepgram.api.key=${DEEPGRAM_API_KEY}
 
-# Logging configuration (optional, Spring Boot provides defaults)
+# ─── Ollama ──────────────────────────────────────────
+ollama.api.url=${OLLAMA_API_URL:http://localhost:11434/api/generate}
+ollama.default.model=${OLLAMA_DEFAULT_MODEL:mistral}
+
+# ─── Logging (optional) ─────────────────────────────
 # logging.level.com.example.backend=DEBUG
 # logging.level.org.springframework.web.socket=DEBUG

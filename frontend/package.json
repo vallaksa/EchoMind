@@ -12,9 +12,11 @@
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
+    "@fontsource/inter": "^5.2.8",
     "@microsoft/fetch-event-source": "^2.0.1",
     "@mui/icons-material": "^5.17.1",
     "@mui/material": "^5.17.1",
+    "framer-motion": "^12.35.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

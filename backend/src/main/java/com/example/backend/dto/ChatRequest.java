@@ -1,5 +1,7 @@
 package com.example.backend.dto;
 
+import org.springframework.util.StringUtils;
+
 public class ChatRequest {
     private String prompt;
     private String model;
@@ -35,5 +37,9 @@ public class ChatRequest {
 
     public void setContext(String context) {
         this.context = context;
+    }
+
+    public boolean hasPrompt() {
+        return StringUtils.hasText(prompt);
     }
 }
